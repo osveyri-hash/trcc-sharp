@@ -17,15 +17,13 @@ public enum ThemeKind
     History,
     Rings,
     Bars,
-    Columns,
     Dial,
     Typographic,
     Cells,
     List,
     Wave,
     Split,
-    Ticks,
-    Radar,
+    Custom,
     Test
 }
 
@@ -44,6 +42,16 @@ public static class ThemeRenderer
 
     /// <summary>Акцент по умолчанию — тушь, без цвета.</summary>
     public static readonly Color DefaultAccent = Color.FromRgb(0x10, 0x10, 0x12);
+
+    /// <summary>
+    /// Раскладка своего кадра. Список заменяется целиком при каждом изменении:
+    /// поток отрисовки видит готовый снимок, а не половину перетаскивания.
+    /// </summary>
+    public static IReadOnlyList<PanelWidget> Widgets { get; set; } = Array.Empty<PanelWidget>();
+
+    /// <summary>Габариты одного объекта раскладки на кадре.</summary>
+    public const double WidgetWidth = 92;
+    public const double WidgetHeight = 38;
 
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("ru-RU");
 
@@ -177,9 +185,6 @@ public static class ThemeRenderer
                 case ThemeKind.Bars:
                     DrawBars(dc, sensors, text);
                     break;
-                case ThemeKind.Columns:
-                    DrawColumns(dc, sensors, text);
-                    break;
                 case ThemeKind.Dial:
                     DrawDial(dc, sensors, text);
                     break;
@@ -198,11 +203,8 @@ public static class ThemeRenderer
                 case ThemeKind.Split:
                     DrawSplit(dc, sensors, text);
                     break;
-                case ThemeKind.Ticks:
-                    DrawTicks(dc, sensors, text);
-                    break;
-                case ThemeKind.Radar:
-                    DrawRadar(dc, sensors, text);
+                case ThemeKind.Custom:
+                    DrawCustom(dc, sensors, text);
                     break;
                 case ThemeKind.Media:
                     DrawMediaHint(dc, text);
@@ -592,39 +594,6 @@ public static class ThemeRenderer
         DrawCaption(dc, caption);
     }
 
-    /// <summary>Столбцы: три вертикальные колонки от общей базовой линии.</summary>
-    private static void DrawColumns(DrawingContext dc, SensorSnapshot sensors, string? caption)
-    {
-        DrawHeader(dc, "柱", "СТОЛБЦЫ");
-
-        const double baseline = 170, top = 58;
-
-        var columns = new (double X, double Fraction, string Value, string Title)[]
-        {
-            (62, Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1), $"{sensors.CpuLoadPercent:0}%", "ЦП"),
-            (160, Math.Clamp(sensors.RamLoadPercent / 100, 0, 1), $"{sensors.RamLoadPercent:0}%", "ОЗУ"),
-            (258, sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0,
-                sensors.GpuTempC is { } c ? $"{c:0}°" : "—", "ГП")
-        };
-
-        DrawRule(dc, 22, baseline, 276);
-
-        foreach (var column in columns)
-        {
-            var height = (baseline - top) * Math.Clamp(column.Fraction, 0, 1);
-
-            if (height > 1)
-                dc.DrawRectangle(AccentFill(0.8), null, new Rect(column.X - 21, baseline - height, 42, height));
-            else
-                dc.DrawRectangle(Rule, null, new Rect(column.X - 21, baseline - 2, 42, 2));
-
-            DrawCentered(dc, column.Value, column.X, baseline - height - 16, 15, Ink, Regular);
-            DrawTrackedCentered(dc, column.Title, column.X, baseline + 12, 8.5, Grey, 1.6);
-        }
-
-        DrawCaption(dc, caption);
-    }
-
     /// <summary>Шкала: большая дуга-спидометр на 240° и две метрики справа.</summary>
     private static void DrawDial(DrawingContext dc, SensorSnapshot sensors, string? caption)
     {
@@ -792,97 +761,51 @@ public static class ThemeRenderer
         DrawCaption(dc, caption);
     }
 
-    /// <summary>Деления: линейная шкала с бегунком на текущем значении ЦП.</summary>
-    private static void DrawTicks(DrawingContext dc, SensorSnapshot sensors, string? caption)
-    {
-        DrawHeader(dc, "目", "ДЕЛЕНИЯ");
-
-        const double left = 22, right = 298, baseline = 122;
-        var fraction = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
-
-        for (var i = 0; i <= 50; i++)
-        {
-            var x = Math.Round(left + (right - left) * i / 50.0) + 0.5;
-            var length = i % 10 == 0 ? 16 : i % 5 == 0 ? 10 : 6;
-            dc.DrawLine(RulePen, new Point(x, baseline), new Point(x, baseline - length));
-        }
-
-        var marker = left + (right - left) * fraction;
-        var markerPen = new Pen(_accentBrush, 2);
-        markerPen.Freeze();
-        dc.DrawLine(markerPen, new Point(marker, baseline - 28), new Point(marker, baseline + 10));
-
-        var labelX = Math.Clamp(marker, 46, 274);
-        DrawCentered(dc, $"{sensors.CpuLoadPercent:0}", labelX, baseline - 48, 22, Ink, Thin);
-
-        DrawTracked(dc, "ЗАГРУЗКА ЦП", 22, baseline + 22, 8.5, Grey, 1.6);
-        DrawRule(dc, 22, 176, 276);
-
-        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 22, 184, 11, Ink, Regular);
-        DrawRight(dc, sensors.GpuTempC is { } temp ? $"ГП {temp:0} °C" : "ГП —", 298, 184, 11, Grey, Regular);
-
-        DrawCaption(dc, caption);
-    }
-
     /// <summary>
-    /// Радар: три метрики на осях через 120° — ЦП сверху, ОЗУ справа, ГП слева.
-    /// Кольца показывают шкалу 33/66/100 %, фигура — текущее положение.
+    /// Свой кадр: объекты раскладки — подпись и значение. Пусто — подсказка,
+    /// что объекты добавляются в разделе «СВОЁ».
     /// </summary>
-    private static void DrawRadar(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    private static void DrawCustom(DrawingContext dc, SensorSnapshot sensors, string? caption)
     {
-        DrawHeader(dc, "探", "РАДАР");
+        var widgets = Widgets;
 
-        const double cx = 160, cy = 124, radius = 56;
-
-        var cpu = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
-        var ram = Math.Clamp(sensors.RamLoadPercent / 100, 0, 1);
-        var gpu = sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0;
-
-        // Паутина: три кольца и три оси.
-        for (var ring = 1; ring <= 3; ring++)
-            dc.DrawEllipse(null, RulePen, new Point(cx, cy), radius * ring / 3.0, radius * ring / 3.0);
-
-        var axes = new[] { -90.0, 30.0, 150.0 };
-
-        foreach (var angle in axes)
-            dc.DrawLine(RulePen, new Point(cx, cy), PointOnCircle(cx, cy, radius, angle));
-
-        // Фигура по трём метрикам.
-        var fractions = new[] { cpu, ram, gpu };
-        var vertices = new Point[3];
-
-        for (var i = 0; i < 3; i++)
-            vertices[i] = PointOnCircle(cx, cy, Math.Max(2, radius * fractions[i]), axes[i]);
-
-        var shape = new StreamGeometry();
-        using (var ctx = shape.Open())
+        if (widgets.Count == 0)
         {
-            ctx.BeginFigure(vertices[0], true, true);
-            ctx.LineTo(vertices[1], true, false);
-            ctx.LineTo(vertices[2], true, false);
+            DrawHeader(dc, "自", "СВОЙ");
+            DrawText(dc, "Пусто", 22, 92, 26, Ink, Thin);
+            DrawText(dc, "Добавь объекты в разделе «СВОЁ»", 22, 132, 11, Grey, Regular);
+            DrawCaption(dc, caption);
+            return;
         }
 
-        shape.Freeze();
-
-        var edge = new Pen(_accentBrush, 1.8) { LineJoin = PenLineJoin.Round };
-        edge.Freeze();
-
-        dc.DrawGeometry(AccentFill(0.18), edge, shape);
-
-        foreach (var vertex in vertices)
-            dc.DrawEllipse(_accentBrush, null, vertex, 2.4, 2.4);
-
-        // Подписи у вершин: сверху, справа и слева — чтобы не лезть на фигуру.
-        DrawCentered(dc, $"ЦП {sensors.CpuLoadPercent:0} %", cx, 44, 10, Ink, Regular);
-        DrawCentered(dc, $"ОЗУ {sensors.RamLoadPercent:0} %", 248, 146, 10, Ink, Regular);
-        DrawCentered(dc, sensors.GpuTempC is { } g ? $"ГП {g:0} °C" : "ГП —", 72, 146, 10, Ink, Regular);
-
-        DrawRule(dc, 22, 190, 276);
-        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 22, 196, 9.5, Grey, Regular);
-        DrawRight(dc, FormatUptime(sensors.Uptime), 298, 196, 9.5, Grey, Regular);
+        foreach (var widget in widgets)
+            DrawWidget(dc, sensors, widget);
 
         DrawCaption(dc, caption);
     }
+
+    /// <summary>Один объект раскладки: тихая подпись сверху, значение под ней.</summary>
+    private static void DrawWidget(DrawingContext dc, SensorSnapshot sensors, PanelWidget widget)
+    {
+        var (label, value) = WidgetText(sensors, widget.Type);
+
+        DrawTracked(dc, label, widget.X, widget.Y, 8.5, Grey, 1.6);
+        DrawText(dc, value, widget.X, widget.Y + 12, 21, Ink, Thin);
+    }
+
+    /// <summary>Что писать в объекте выбранного типа.</summary>
+    private static (string Label, string Value) WidgetText(SensorSnapshot sensors, string type) => type switch
+    {
+        "ram" => ("ОЗУ", $"{sensors.RamUsedGb:0.0} ГБ"),
+        "gpu" => ("ГП", sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—"),
+        "uptime" => ("СИСТЕМА", FormatUptime(sensors.Uptime)),
+        "clock" => ("ВРЕМЯ", DateTime.Now.ToString("HH:mm", Culture)),
+        _ => ("ЦП", $"{sensors.CpuLoadPercent:0} %")
+    };
+
+    /// <summary>Габариты объекта на кадре — по ним же идёт перетаскивание мышью.</summary>
+    public static Rect WidgetBounds(PanelWidget widget) =>
+        new(widget.X, widget.Y, WidgetWidth, WidgetHeight);
 
     /// <summary>Заливка под кривой истории — замкнутый контур до нижней границы.</summary>
     private static void DrawSparkArea(DrawingContext dc, double[] values,

@@ -54,15 +54,13 @@ public sealed class ThemePreset : INotifyPropertyChanged
         ThemeKind.History => Loc.T("view.history"),
         ThemeKind.Rings => Loc.T("view.rings"),
         ThemeKind.Bars => Loc.T("view.bars"),
-        ThemeKind.Columns => Loc.T("view.columns"),
         ThemeKind.Dial => Loc.T("view.dial"),
         ThemeKind.Typographic => Loc.T("view.typo"),
         ThemeKind.Cells => Loc.T("view.cells"),
         ThemeKind.List => Loc.T("view.list"),
         ThemeKind.Wave => Loc.T("view.wave"),
         ThemeKind.Split => Loc.T("view.split"),
-        ThemeKind.Ticks => Loc.T("view.ticks"),
-        ThemeKind.Radar => Loc.T("view.radar"),
+        ThemeKind.Custom => Loc.T("view.custom"),
         ThemeKind.Test => Loc.T("tile.test"),
         _ => Loc.T("tile.monitor")
     };

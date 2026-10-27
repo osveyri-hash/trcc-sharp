@@ -90,9 +90,8 @@ public partial class App : Application
         {
             ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Media,
             ThemeKind.Minimal, ThemeKind.History, ThemeKind.Rings,
-            ThemeKind.Bars, ThemeKind.Columns, ThemeKind.Dial, ThemeKind.Typographic,
-            ThemeKind.Cells, ThemeKind.List, ThemeKind.Wave, ThemeKind.Split,
-            ThemeKind.Ticks, ThemeKind.Radar, ThemeKind.Test
+            ThemeKind.Bars, ThemeKind.Dial, ThemeKind.Typographic,
+            ThemeKind.Cells, ThemeKind.List, ThemeKind.Wave, ThemeKind.Split, ThemeKind.Test
         };
 
         foreach (var theme in themes)

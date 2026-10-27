@@ -4,7 +4,7 @@
 !include "LogicLib.nsh"
 
 !define APPNAME    "TrccSharp"
-!define VERSION    "0.2.6"
+!define VERSION    "0.2.7"
 !define PUBLISHER  "TrccSharp"
 !define APPEXE     "TrccSharp.exe"
 !define APPICON    "TrccSharp.ico"
@@ -33,7 +33,7 @@ BrandingText "${APPNAME} ${VERSION}"
 Icon "..\src\TrccSharp.App\assets\TrccSharp.ico"
 UninstallIcon "..\src\TrccSharp.App\assets\TrccSharp.ico"
 
-VIProductVersion "0.2.6.0"
+VIProductVersion "0.2.7.0"
 VIAddVersionKey "ProductName"     "${APPNAME}"
 VIAddVersionKey "FileDescription" "${APPNAME} installer"
 VIAddVersionKey "FileVersion"     "${VERSION}"

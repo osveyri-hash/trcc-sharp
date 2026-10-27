@@ -20,6 +20,12 @@ public sealed class Settings
     /// <summary>Цвет акцента темы, «#RRGGBB».</summary>
     public string? Accent { get; set; }
 
+    /// <summary>Своя подпись внизу кадра; пусто — подписи нет.</summary>
+    public string? Caption { get; set; }
+
+    /// <summary>Своя раскладка панели: объекты, которые двигаются по превью.</summary>
+    public List<PanelWidget> Layout { get; set; } = new();
+
     /// <summary>Тема окна: "light" (бумага) или "dark" (тушь).</summary>
     public string? UiTheme { get; set; }
 
@@ -59,6 +65,7 @@ public sealed class Settings
                 if (settings is not null)
                 {
                     settings.RecentMedia ??= new List<string>();
+                    settings.Layout ??= new List<PanelWidget>();
                     return settings;
                 }
             }

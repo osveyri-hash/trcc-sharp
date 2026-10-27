@@ -239,6 +239,33 @@
             </Setter>
         </Style>
 
+        <!-- Кружок акцента: цвет внутри, кольцо вокруг, выбор — жирное кольцо -->
+        <Style x:Key="AccentDot" TargetType="ToggleButton">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="Margin" Value="0,0,8,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Grid Background="Transparent">
+                            <Ellipse x:Name="Ring" Stroke="{DynamicResource Rule}" StrokeThickness="1" />
+                            <Ellipse x:Name="Dot" Margin="4" Fill="{TemplateBinding Background}" />
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Rose}" />
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="Ring" Property="Stroke" Value="{DynamicResource Ink}" />
+                                <Setter TargetName="Ring" Property="StrokeThickness" Value="2" />
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Кнопка-контур -->
         <Style x:Key="Ghost" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource Ink}" />
@@ -690,38 +717,123 @@
                                     <ToggleButton x:Name="ViewBars" Style="{StaticResource Seg}" Tag="Bars"
                                                   Margin="0,0,5,5" Click="OnViewClick"
                                                   Content="{Binding [view.bars], Source={x:Static app:Loc.Instance}}" />
-                                    <ToggleButton x:Name="ViewColumns" Style="{StaticResource Seg}" Tag="Columns"
-                                                  Margin="0,0,5,5" Click="OnViewClick"
-                                                  Content="{Binding [view.columns], Source={x:Static app:Loc.Instance}}" />
                                     <ToggleButton x:Name="ViewDial" Style="{StaticResource Seg}" Tag="Dial"
                                                   Margin="0,0,5,5" Click="OnViewClick"
                                                   Content="{Binding [view.dial], Source={x:Static app:Loc.Instance}}" />
                                     <ToggleButton x:Name="ViewType" Style="{StaticResource Seg}" Tag="Typographic"
-                                                  Margin="0,0,0,5" Click="OnViewClick"
+                                                  Margin="0,0,5,5" Click="OnViewClick"
                                                   Content="{Binding [view.typo], Source={x:Static app:Loc.Instance}}" />
-
                                     <ToggleButton x:Name="ViewCells" Style="{StaticResource Seg}" Tag="Cells"
-                                                  Margin="0,0,5,5" Click="OnViewClick"
+                                                  Margin="0,0,0,5" Click="OnViewClick"
                                                   Content="{Binding [view.cells], Source={x:Static app:Loc.Instance}}" />
+
                                     <ToggleButton x:Name="ViewList" Style="{StaticResource Seg}" Tag="List"
-                                                  Margin="0,0,5,5" Click="OnViewClick"
+                                                  Margin="0,0,5,0" Click="OnViewClick"
                                                   Content="{Binding [view.list], Source={x:Static app:Loc.Instance}}" />
                                     <ToggleButton x:Name="ViewWave" Style="{StaticResource Seg}" Tag="Wave"
-                                                  Margin="0,0,5,5" Click="OnViewClick"
+                                                  Margin="0,0,5,0" Click="OnViewClick"
                                                   Content="{Binding [view.wave], Source={x:Static app:Loc.Instance}}" />
                                     <ToggleButton x:Name="ViewSplit" Style="{StaticResource Seg}" Tag="Split"
-                                                  Margin="0,0,0,5" Click="OnViewClick"
+                                                  Margin="0,0,5,0" Click="OnViewClick"
                                                   Content="{Binding [view.split], Source={x:Static app:Loc.Instance}}" />
-
-                                    <ToggleButton x:Name="ViewTicks" Style="{StaticResource Seg}" Tag="Ticks"
-                                                  Margin="0,0,5,0" Click="OnViewClick"
-                                                  Content="{Binding [view.ticks], Source={x:Static app:Loc.Instance}}" />
-                                    <ToggleButton x:Name="ViewRadar" Style="{StaticResource Seg}" Tag="Radar"
-                                                  Margin="0,0,5,0" Click="OnViewClick"
-                                                  Content="{Binding [view.radar], Source={x:Static app:Loc.Instance}}" />
+                                    <ToggleButton x:Name="ViewCustom" Style="{StaticResource Seg}" Tag="Custom"
+                                                  Margin="0" Click="OnViewClick"
+                                                  Content="{Binding [view.custom], Source={x:Static app:Loc.Instance}}" />
                                 </UniformGrid>
                             </controls:LiquidSegments>
                         </Grid>
+
+                        <Border Height="1" Background="{DynamicResource Rule}" Margin="0,16,0,14" />
+
+                        <!-- СВОЁ: акцент кадра и собственная подпись -->
+                        <TextBlock x:Name="SectionCustom"
+                                   Text="{Binding [section.custom], Source={x:Static app:Loc.Instance}}"
+                                   Style="{StaticResource Section}" />
+
+                        <Grid Margin="0,0,0,9">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="AccentLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowAccentLabel"
+                                       Text="{Binding [custom.accent], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ToggleButton x:Name="AccentInk" Style="{StaticResource AccentDot}"
+                                              Background="#101012" Tag="#101012" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.ink], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentRose" Style="{StaticResource AccentDot}"
+                                              Background="#D98F96" Tag="#D98F96" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.rose], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentOcean" Style="{StaticResource AccentDot}"
+                                              Background="#4C9BC4" Tag="#4C9BC4" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.ocean], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentForest" Style="{StaticResource AccentDot}"
+                                              Background="#4F8A5F" Tag="#4F8A5F" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.forest], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentAmber" Style="{StaticResource AccentDot}"
+                                              Background="#C98A3C" Tag="#C98A3C" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.amber], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentViolet" Style="{StaticResource AccentDot}"
+                                              Background="#8E7CC3" Tag="#8E7CC3" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.violet], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentCoral" Style="{StaticResource AccentDot}"
+                                              Background="#E06B5E" Tag="#E06B5E" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.coral], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="AccentMint" Style="{StaticResource AccentDot}"
+                                              Background="#4FBFA0" Tag="#4FBFA0" Margin="0" Click="OnAccentClick"
+                                              ToolTip="{Binding [accent.mint], Source={x:Static app:Loc.Instance}}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="CaptionLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowCaptionLabel"
+                                       Text="{Binding [custom.caption], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <TextBox x:Name="CaptionBox" Grid.Column="1" Style="{StaticResource Field}"
+                                     TextChanged="OnCaptionChanged"
+                                     ToolTip="{Binding [custom.caption.hint], Source={x:Static app:Loc.Instance}}" />
+                        </Grid>
+
+                        <Grid Margin="0,9,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="LayoutLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowLayoutLabel"
+                                       Text="{Binding [custom.layout], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                <Button x:Name="AddWidgetButton" Style="{StaticResource Ghost}"
+                                        Click="OnAddWidgetClick"
+                                        Content="{Binding [custom.add], Source={x:Static app:Loc.Instance}}">
+                                    <Button.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Tag="cpu" Click="OnAddWidgetType"
+                                                      Header="{Binding [widget.cpu], Source={x:Static app:Loc.Instance}}" />
+                                            <MenuItem Tag="ram" Click="OnAddWidgetType"
+                                                      Header="{Binding [widget.ram], Source={x:Static app:Loc.Instance}}" />
+                                            <MenuItem Tag="gpu" Click="OnAddWidgetType"
+                                                      Header="{Binding [widget.gpu], Source={x:Static app:Loc.Instance}}" />
+                                            <MenuItem Tag="uptime" Click="OnAddWidgetType"
+                                                      Header="{Binding [widget.uptime], Source={x:Static app:Loc.Instance}}" />
+                                            <MenuItem Tag="clock" Click="OnAddWidgetType"
+                                                      Header="{Binding [widget.clock], Source={x:Static app:Loc.Instance}}" />
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
+                                <Button x:Name="RemoveWidgetButton" Style="{StaticResource Ghost}" Margin="8,0,0,0"
+                                        Click="OnRemoveWidgetClick" IsEnabled="False" Opacity="0.4"
+                                        Content="{Binding [custom.remove], Source={x:Static app:Loc.Instance}}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,7,0,0"
+                                   Text="{Binding [custom.hint], Source={x:Static app:Loc.Instance}}" />
 
                         <Border Height="1" Background="{DynamicResource Rule}" Margin="0,16,0,14" />
 
@@ -931,9 +1043,19 @@
                         <Viewbox Stretch="Uniform" Margin="1">
                             <Grid Width="320" Height="240">
                                 <Image x:Name="Preview" Stretch="Fill"
-                                       RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                                       RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                       MouseLeftButtonDown="OnPreviewMouseDown"
+                                       MouseMove="OnPreviewMouseMove"
+                                       MouseLeftButtonUp="OnPreviewMouseUp"
+                                       MouseLeave="OnPreviewMouseLeave" />
                                 <!-- Затемнение превью повторяет яркость панели -->
                                 <Rectangle x:Name="PreviewDim" Fill="Black" Opacity="0" IsHitTestVisible="False" />
+                                <!-- Рамка выбранного объекта: только в окне, на панель не уходит -->
+                                <Canvas IsHitTestVisible="False">
+                                    <Border x:Name="WidgetSelection" Visibility="Collapsed"
+                                            BorderBrush="{DynamicResource Rose}" BorderThickness="1"
+                                            CornerRadius="3" />
+                                </Canvas>
                             </Grid>
                         </Viewbox>
                     </Border>
