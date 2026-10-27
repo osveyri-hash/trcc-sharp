@@ -30,9 +30,15 @@ public partial class App : Application
         _singleInstance = new Mutex(initiallyOwned: true, @"Local\TrccSharp.SingleInstance", out var isFirst);
         if (!isFirst)
         {
-            MessageBox.Show(
-                "TrccSharp уже запущен.\n\nДва окна одновременно шлют кадры в панель — на экране СЖО они накладываются друг на друга.",
-                "TrccSharp", MessageBoxButton.OK, MessageBoxImage.Information);
+            // Автозапуск не должен показывать окно с ошибкой, если приложение
+            // уже открыто: просто тихо выходим, второй экземпляр не нужен.
+            if (!TrccSharp.App.Startup.IsAutoStart)
+            {
+                MessageBox.Show(
+                    "TrccSharp уже запущен.\n\nДва окна одновременно шлют кадры в панель — на экране СЖО они накладываются друг на друга.",
+                    "TrccSharp", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+
             Shutdown();
             return;
         }
@@ -47,18 +53,25 @@ public partial class App : Application
         Directory.CreateDirectory(directory);
 
         var sensors = new SensorReader().Read();
-        foreach (var theme in new[] { ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Test })
+        var themes = new[] { ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Media, ThemeKind.Minimal, ThemeKind.Test };
+
+        foreach (var theme in themes)
         {
-            var surface = ThemeRenderer.Render(theme, sensors);
-            var bitmap = BitmapSource.Create(surface.Width, surface.Height, 96, 96,
-                PixelFormats.Bgra32, null, surface.Bgra, surface.Width * 4);
+            // Чёрная панель — не отдельная тема, а вариант той же раскладки.
+            foreach (var dark in new[] { false, true })
+            {
+                var surface = ThemeRenderer.Render(theme, sensors, null, null, "подпись темы", dark);
+                var bitmap = BitmapSource.Create(surface.Width, surface.Height, 96, 96,
+                    PixelFormats.Bgra32, null, surface.Bgra, surface.Width * 4);
 
-            var encoder = new PngBitmapEncoder();
-            encoder.Frames.Add(BitmapFrame.Create(bitmap));
+                var encoder = new PngBitmapEncoder();
+                encoder.Frames.Add(BitmapFrame.Create(bitmap));
 
-            var path = Path.Combine(directory, $"theme-{theme.ToString().ToLowerInvariant()}.png");
-            using var stream = File.Create(path);
-            encoder.Save(stream);
+                var name = theme.ToString().ToLowerInvariant() + (dark ? "-dark" : "");
+                var path = Path.Combine(directory, $"theme-{name}.png");
+                using var stream = File.Create(path);
+                encoder.Save(stream);
+            }
         }
     }
 }

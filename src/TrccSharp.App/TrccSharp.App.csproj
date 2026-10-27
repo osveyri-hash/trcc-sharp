@@ -13,4 +13,9 @@
     <ProjectReference Include="..\TrccSharp.Core\TrccSharp.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Фон окна: картинка пользователя, из неё Backdrop.cs делает маску по яркости. -->
+    <Resource Include="assets\backdrop.jpg" />
+  </ItemGroup>
+
 </Project>

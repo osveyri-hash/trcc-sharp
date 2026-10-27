@@ -40,6 +40,9 @@ public sealed class VideoClip : MediaClip
 
     public override string Kind => "видео";
 
+    /// <summary>Плеер уже знает размер кадра — можно рисовать не чёрный прямоугольник.</summary>
+    public bool IsReady => _player.NaturalVideoWidth > 0 && _player.NaturalVideoHeight > 0;
+
     /// <summary>
     /// MediaPlayer не отдаёт fps файла, поэтому берём типичные 30 кадр/с:
     /// видео всё равно проигрывается в реальном времени, а сколько кадров успеет

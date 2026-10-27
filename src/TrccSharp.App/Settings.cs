@@ -13,6 +13,30 @@ public sealed class Settings
     /// <summary>Яркость панели, 10–100 %.</summary>
     public int Brightness { get; set; } = 100;
 
+    /// <summary>Цвет акцента темы, «#RRGGBB».</summary>
+    public string? Accent { get; set; }
+
+    /// <summary>Тема окна: "light" (бумага) или "dark" (тушь).</summary>
+    public string? UiTheme { get; set; }
+
+    /// <summary>Язык интерфейса: "ru" или "en".</summary>
+    public string? Language { get; set; }
+
+    /// <summary>Панель в чёрном варианте (та же тема, инвертированные цвета).</summary>
+    public bool PanelDark { get; set; }
+
+    /// <summary>Свой фон тем «Монитор» и «Часы» — путь к картинке; пусто — бумага темы.</summary>
+    public string? Backdrop { get; set; }
+
+    /// <summary>Недавние картинки и видео: одна строка под выбором медиа.</summary>
+    public List<string> RecentMedia { get; set; } = new();
+
+    /// <summary>Запускать экран СЖО при входе в Windows.</summary>
+    public bool AutoStart { get; set; } = true;
+
+    /// <summary>Левая панель свёрнута до одних контролов (кнопка «три полоски»).</summary>
+    public bool Compact { get; set; }
+
     private static string Folder => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TrccSharp");
 
@@ -23,7 +47,14 @@ public sealed class Settings
         try
         {
             if (File.Exists(FilePath))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath)) ?? new Settings();
+            {
+                var settings = JsonSerializer.Deserialize<Settings>(File.ReadAllText(FilePath));
+                if (settings is not null)
+                {
+                    settings.RecentMedia ??= new List<string>();
+                    return settings;
+                }
+            }
         }
         catch
         {

@@ -14,6 +14,17 @@ public static class MediaClipFactory
         "|Видео|*.mp4;*.m4v;*.wmv;*.avi;*.mov;*.mkv;*.webm" +
         "|Все файлы|*.*";
 
+    /// <summary>Для фона годится картинка; у GIF берётся первый кадр.</summary>
+    public const string ImageFilter =
+        "Картинки|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff" +
+        "|Все файлы|*.*";
+
+    public static bool IsImage(string path)
+    {
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        return ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".tif" or ".tiff";
+    }
+
     public static bool IsSupported(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
