@@ -26,10 +26,12 @@ public partial class MainWindow : Window
 {
     private readonly SensorReader _sensors = new();
     private readonly CancellationTokenSource _lifetime = new();
+
+    // Настройки пишутся с задержкой: ползунки не должны грузить диск на каждый пиксель.
+    private readonly DispatcherTimer _saveDelay = new() { Interval = TimeSpan.FromMilliseconds(350) };
     private readonly Settings _settings = Settings.Load();
     private readonly ThemeStore _themes = ThemeStore.Load();
 
-    private readonly (ToggleButton Tile, ThemeKind Kind)[] _tiles;
 
     private volatile PanelDevice? _device;
     private Surface? _frame;
@@ -45,27 +47,45 @@ public partial class MainWindow : Window
     private ImageSource? _backdrop;
     private string? _backdropPath;
 
+    /// <summary>Анимированный фон (GIF или видео) — играет вместо статичного фото.</summary>
+    private MediaClip? _backdropClip;
+
     // Оформление темы: акцент внизу кадра (выбирается только пресетом).
     private ThemeKind _theme = ThemeKind.Monitor;
     private Color _accent = ThemeRenderer.DefaultAccent;
 
-    // Своя подпись внизу кадра — пустая строка означает «без подписи».
-    private string _caption = "";
 
-    // Своя раскладка: объекты панели и тот, что сейчас тащат или удаляют.
-    private readonly List<PanelWidget> _widgets = new();
-    private PanelWidget? _selectedWidget;
+    // Своя раскладка: объекты панели и выделение (одно или несколько).
+    private List<PanelWidget> _widgets = new();
+    private readonly Dictionary<ThemeKind, List<PanelWidget>> _layouts = new();
+    private readonly List<PanelWidget> _selection = new();
     private bool _dragging;
-    private Point _dragOffset;
+    private readonly Dictionary<PanelWidget, Point> _dragOrigins = new();
+    private Point _dragStart;
+
+    // Рамка выделения: тянем по пустому месту и обводим несколько объектов.
+    private bool _marquee;
+    private Point _marqueeStart;
 
     // Оформление кадра: шрифт, цвет текста и яркость фона.
     private string _panelFont = "Segoe UI";
     private string _panelInk = "";
     private int _background = 100;
+    private int _widgetBrightness = 100;
 
     // Сдвиг и масштаб содержимого — свой для каждого вида.
     private readonly Dictionary<ThemeKind, ViewTransform> _transforms = new();
     private bool _syncingScale;
+    private bool _syncingFont;
+    private bool _syncingText;
+    private readonly Dictionary<PanelWidget, string?> _fontPreview = new();
+
+    // Своя палитра цвета: тон, насыщенность, яркость и что сейчас тянут.
+    private double _hue;
+    private double _saturation = 1;
+    private double _value = 1;
+    private bool _pickingSquare;
+    private bool _pickingHue;
     private bool _movingView;
     private Point _moveStart;
     private double _moveFromX;
@@ -79,15 +99,11 @@ public partial class MainWindow : Window
 
     // Вид темы «Монитор»: обычный, минимал, график, кольца и ещё десять —
     // все они живут внутри одной плитки «Монитор» строкой «ВИД».
-    private ThemeKind _monitorView = ThemeKind.Monitor;
 
     // Левая панель свёрнута до одних контролов (кнопка «три полоски»).
     private bool _compact;
 
     // Стеклянная заливка под плитками тем уже стоит на месте.
-    private bool _glassPlaced;
-    private bool _glassTracking;
-    private DateTime _glassTrackUntil;
 
     // Превью обновляется в один и тот же WriteableBitmap — без нового BitmapSource на кадр.
     private WriteableBitmap? _previewBitmap;
@@ -115,7 +131,7 @@ public partial class MainWindow : Window
 
     // Частота: ползунок задаёт её для тем «Монитор», «Часы», «Минимал», «Тест».
     // В теме «Медиа» ритм берётся у самого файла, поэтому рабочая частота — отдельная.
-    private const int MaxMediaFps = 10;
+    private const int MaxMediaFps = 30;
     private int _sliderFps = 2;
     private volatile int _effectiveFps = 2;
     private double _measuredFps;
@@ -143,6 +159,12 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
 
+        _saveDelay.Tick += (_, _) =>
+        {
+            _saveDelay.Stop();
+            SaveSettings();
+        };
+
         // Иконка-бургер слегка пружинит при нажатии — движение читается как «щелчок».
         CompactToggle.RenderTransformOrigin = new Point(0.5, 0.5);
         CompactToggle.RenderTransform = new ScaleTransform(1, 1);
@@ -159,7 +181,6 @@ public partial class MainWindow : Window
         Loc.Changed += OnLanguageChanged;
 
         _panelDark = _settings.PanelDark;
-        UpdatePanelButtons();
 
         _compact = _settings.Compact;
         ApplyCompact(_compact);
@@ -169,14 +190,6 @@ public partial class MainWindow : Window
         if (_settings.AutoStart) Startup.Enable();
         else Startup.Disable();
 
-        _tiles = new[]
-        {
-            (TileMonitor, ThemeKind.Monitor),
-            (TileClock, ThemeKind.Clock),
-            (TileMedia, ThemeKind.Media)
-        };
-
-        _themes.EnsureStarterThemes();
 
         PresetList.ItemsSource = _themes.Items;
         RefreshPresetHint();
@@ -190,16 +203,43 @@ public partial class MainWindow : Window
         if (IsOldDarkTheme(_settings.Theme))
         {
             _panelDark = true;
-            UpdatePanelButtons();
         }
+
+        // Настройки кадра — до выбора вида. Иначе «Свой» вид успевает добавить
+        // стартовый набор объектов, и он ложится поверх сохранённой раскладки.
+        foreach (var pair in _settings.Layouts)
+        {
+            if (Enum.TryParse<ThemeKind>(pair.Key, true, out var layoutKind) && pair.Value is not null)
+                _layouts[layoutKind] = pair.Value;
+        }
+
+        _widgets = LayoutFor(RenderKind());
+        PublishWidgets();
+
+        _panelFont = string.IsNullOrWhiteSpace(_settings.PanelFont) ? "Segoe UI" : _settings.PanelFont;
+        ThemeRenderer.FontName = _panelFont;
+
+        _panelInk = _settings.PanelInk == "light" ? "" : _settings.PanelInk ?? "";
+        _background = _settings.Background is >= 20 and <= 100 ? _settings.Background : 50;
+        ThemeRenderer.BackgroundBrightness = _background / 100.0;
+
+        _widgetBrightness = _settings.WidgetBrightness is >= 50 and <= 200 ? _settings.WidgetBrightness : 100;
+        ThemeRenderer.WidgetBrightness = _widgetBrightness / 100.0;
+
+        foreach (var pair in _settings.Transforms)
+        {
+            if (Enum.TryParse<ThemeKind>(pair.Key, true, out var kind) && pair.Value is not null)
+                _transforms[kind] = pair.Value.Clone();
+        }
+
+        SetAccent(ThemePreset.ToColor(_settings.Accent));
+        ApplyInk();
 
         SelectTheme(ParseTheme(_settings.Theme), apply: false);
 
-        // Вид «Монитора»: новые настройки лежат отдельно, старые — прямо в теме.
-        if (Enum.TryParse<ThemeKind>(_settings.MonitorView, true, out var savedView) && IsViewKind(savedView))
-            SelectView(savedView, apply: false);
 
-        if (_settings.Fps is >= 1 and <= 10)
+
+        if (_settings.Fps is >= 1 and <= 30)
             FpsSlider.Value = _settings.Fps;
 
         if (_settings.MediaPath is { Length: > 0 } savedMedia && File.Exists(savedMedia))
@@ -208,30 +248,6 @@ public partial class MainWindow : Window
         if (_settings.Brightness is >= 10 and <= 100)
             BrightnessSlider.Value = _settings.Brightness;
 
-        SetAccent(ThemePreset.ToColor(_settings.Accent));
-
-        _caption = _settings.Caption ?? "";
-        CaptionBox.Text = _caption;
-        UpdateAccentButtons();
-
-        // Раскладка нужна до первого кадра: свой вид может быть темой запуска.
-        _widgets.AddRange(_settings.Layout);
-        PublishWidgets();
-
-        // Оформление кадра: шрифт, цвет текста, яркость фона и сдвиги видов.
-        _panelFont = string.IsNullOrWhiteSpace(_settings.PanelFont) ? "Segoe UI" : _settings.PanelFont;
-        ThemeRenderer.FontName = _panelFont;
-
-        _panelInk = _settings.PanelInk ?? "";
-        _background = _settings.Background is >= 20 and <= 200 ? _settings.Background : 100;
-        ThemeRenderer.BackgroundBrightness = _background / 100.0;
-        ApplyInk();
-
-        foreach (var pair in _settings.Transforms)
-        {
-            if (Enum.TryParse<ThemeKind>(pair.Key, true, out var kind) && pair.Value is not null)
-                _transforms[kind] = pair.Value.Clone();
-        }
 
         // Командная строка главнее сохранённого: --fps N, --media <файл>, --brightness N.
         var fpsIndex = Array.FindIndex(args, a => a.Equals("--fps", StringComparison.OrdinalIgnoreCase));
@@ -259,6 +275,7 @@ public partial class MainWindow : Window
         FillFonts();
         UpdateInkButtons();
         if (BackgroundSlider is not null) BackgroundSlider.Value = _background;
+        if (TextBrightnessSlider is not null) TextBrightnessSlider.Value = _widgetBrightness;
         ApplyViewTransform();
 
         RenderFrame();
@@ -280,7 +297,6 @@ public partial class MainWindow : Window
             UpdateAutoStartButtons();
             UpdateAutoOutputButtons();
             RefreshRecent();
-            PlaceGlass(animate: false);
             RenderFrame();
 
             // Автозапуск: окно не нужно, экран СЖО работает из трея.
@@ -290,7 +306,6 @@ public partial class MainWindow : Window
         // Окно поменяло размер — плитки пересчитались, стекло встаёт по месту без анимации.
         SizeChanged += (_, _) =>
         {
-            if (_glassPlaced) PlaceGlass(animate: false);
         };
 
         // --auto (ярлык), --autostart (Windows) или включённый «АВТОВЫВОД».
@@ -321,38 +336,18 @@ public partial class MainWindow : Window
         _skin = Skins.Normalize(skin);
         Skins.Apply(_skin);
 
-        if (SkinLight is not null)
-        {
-            SkinLight.IsChecked = Skins.Variant(_skin) == Skins.Light;
-            SkinDark.IsChecked = Skins.Variant(_skin) == Skins.Dark;
-        }
-
         UpdatePaletteButtons();
 
         // Программные подложки LiquidSegments не всегда ловят смену палитры сами.
         // Обновляем их после того, как выставлены IsChecked, иначе стекло
         // встанет на старый вариант.
-        SkinSegments?.Refresh();
         PaletteSegments?.Refresh();
-        PanelSegments?.Refresh();
-        ViewSegments?.Refresh();
         AutoSegments?.Refresh();
         AutoOutputSegments?.Refresh();
         TabSegments?.Refresh();
         LangSegments?.Refresh();
 
         UpdateTitleBar();
-    }
-
-    private void OnSkinClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton option) return;
-
-        var variant = (option.Tag as string) == "dark" ? Skins.Dark : Skins.Light;
-
-        ApplySkin(Skins.Combine(Skins.Family(_skin), variant));
-        option.IsChecked = true;
-        SaveSettings();
     }
 
     private void OnPaletteClick(object sender, RoutedEventArgs e)
@@ -364,6 +359,24 @@ public partial class MainWindow : Window
 
         ApplySkin(Skins.Combine(family, variant));
         option.IsChecked = true;
+        SaveSettings();
+    }
+
+    /// <summary>Значок палитры в шапке открывает выбор палитры окна.</summary>
+    private void OnThemePaletteClick(object sender, RoutedEventArgs e)
+    {
+        if (ThemePalettePopup is null) return;
+
+        UpdatePaletteButtons();
+        ThemePalettePopup.IsOpen = true;
+    }
+
+    /// <summary>Чёрно-белый кружок рядом: светлый и тёмный вариант одной палитры.</summary>
+    private void OnThemeModeClick(object sender, RoutedEventArgs e)
+    {
+        var variant = Skins.Variant(_skin) == Skins.Dark ? Skins.Light : Skins.Dark;
+
+        ApplySkin(Skins.Combine(Skins.Family(_skin), variant));
         SaveSettings();
     }
 
@@ -402,101 +415,7 @@ public partial class MainWindow : Window
 
     private static int ToColorRef(Color color) => color.R | (color.G << 8) | (color.B << 16);
 
-    // ── Чёрная панель ───────────────────────────────────────────────────────
-
-    private void UpdatePanelButtons()
-    {
-        if (PanelLight is null) return;
-
-        PanelLight.IsChecked = !_panelDark;
-        PanelDark.IsChecked = _panelDark;
-
-        // В «Медиа» панель показывает файл как есть — выбор светлой/чёрной
-        // панели ни на что не влияет, поэтому строка неактивна, как и «вид».
-        var isThemed = _theme != ThemeKind.Media;
-        PanelRow.IsEnabled = isThemed;
-        PanelRow.Opacity = isThemed ? 1.0 : 0.4;
-    }
-
-    private void OnPanelClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton option) return;
-
-        _panelDark = (option.Tag as string) == "dark";
-        UpdatePanelButtons();
-
-        _frameDirty = true;
-        SaveSettings();
-
-        if (IsLoaded) RenderFrame();
-    }
-
     // ── Вид «Монитора»: четырнадцать вариантов одной темы ──────────────────
-
-    /// <summary>Кнопки вида в том же порядке, что и в разметке.</summary>
-    private (ToggleButton Button, ThemeKind Kind)[] ViewTiles() => new[]
-    {
-        (ViewFull, ThemeKind.Monitor),
-        (ViewMinimal, ThemeKind.Minimal),
-        (ViewHistory, ThemeKind.History),
-        (ViewRings, ThemeKind.Rings),
-        (ViewBars, ThemeKind.Bars),
-        (ViewDial, ThemeKind.Dial),
-        (ViewType, ThemeKind.Typographic),
-        (ViewCells, ThemeKind.Cells),
-        (ViewList, ThemeKind.List),
-        (ViewWave, ThemeKind.Wave),
-        (ViewSplit, ThemeKind.Split),
-        (ViewCustom, ThemeKind.Custom)
-    };
-
-    /// <summary>Виды — это варианты «Монитора», а не самостоятельные темы.</summary>
-    private static bool IsViewKind(ThemeKind kind) => kind is
-        ThemeKind.Minimal or ThemeKind.History or ThemeKind.Rings or
-        ThemeKind.Bars or ThemeKind.Dial or ThemeKind.Typographic or
-        ThemeKind.Cells or ThemeKind.List or ThemeKind.Wave or ThemeKind.Split or ThemeKind.Custom;
-
-    private void UpdateViewButtons()
-    {
-        if (ViewFull is null) return;
-
-        foreach (var (button, kind) in ViewTiles())
-        {
-            if (button is not null) button.IsChecked = kind == _monitorView;
-        }
-
-        // Вид есть только у «Монитора» — у остальных тем строка неактивна.
-        var isMonitor = _theme == ThemeKind.Monitor;
-        ViewRow.IsEnabled = isMonitor;
-        ViewRow.Opacity = isMonitor ? 1.0 : 0.4;
-    }
-
-    private void OnViewClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton option) return;
-        if (option.Tag is not string tag || !Enum.TryParse<ThemeKind>(tag, true, out var kind)) return;
-
-        SelectView(kind, apply: true);
-    }
-
-    private void SelectView(ThemeKind view, bool apply)
-    {
-        _monitorView = IsViewKind(view) ? view : ThemeKind.Monitor;
-
-        // Свой вид без объектов показывать нечего — ставим стартовые.
-        if (_monitorView == ThemeKind.Custom) EnsureStarterLayout();
-
-        UpdateViewButtons();
-        UpdateWidgetSelection();
-        ApplyViewTransform();
-        _frameDirty = true;
-
-        if (!apply) return;
-        SaveSettings();
-        if (IsLoaded) RenderFrame();
-    }
-
-    // ── Автозапуск ──────────────────────────────────────────────────────────
 
     private void UpdateAutoStartButtons()
     {
@@ -578,18 +497,14 @@ public partial class MainWindow : Window
         var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
 
         AnimateColumn(LeftColumn, targetWidth, duration, easing);
-        AnimateLabelColumn(WindowLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(PanelLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(ViewLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(AutoLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(AutoOutputLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(PaletteLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(AccentLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(CaptionLabelColumn, targetLabelWidth, duration, easing);
-        AnimateLabelColumn(LayoutLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(LabelCaptionColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(TextLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(FontLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(InkLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(BackgroundLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(TextBrightnessLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(ScaleLabelColumn, targetLabelWidth, duration, easing);
 
         foreach (var label in labels)
@@ -620,18 +535,14 @@ public partial class MainWindow : Window
     private void SetLabelColumns(double width)
     {
         var value = new GridLength(width);
-        if (WindowLabelColumn is not null) WindowLabelColumn.Width = value;
-        if (PanelLabelColumn is not null) PanelLabelColumn.Width = value;
-        if (ViewLabelColumn is not null) ViewLabelColumn.Width = value;
         if (AutoLabelColumn is not null) AutoLabelColumn.Width = value;
         if (AutoOutputLabelColumn is not null) AutoOutputLabelColumn.Width = value;
-        if (PaletteLabelColumn is not null) PaletteLabelColumn.Width = value;
-        if (AccentLabelColumn is not null) AccentLabelColumn.Width = value;
-        if (CaptionLabelColumn is not null) CaptionLabelColumn.Width = value;
-        if (LayoutLabelColumn is not null) LayoutLabelColumn.Width = value;
+        if (LabelCaptionColumn is not null) LabelCaptionColumn.Width = value;
+        if (TextLabelColumn is not null) TextLabelColumn.Width = value;
         if (FontLabelColumn is not null) FontLabelColumn.Width = value;
         if (InkLabelColumn is not null) InkLabelColumn.Width = value;
         if (BackgroundLabelColumn is not null) BackgroundLabelColumn.Width = value;
+        if (TextBrightnessLabelColumn is not null) TextBrightnessLabelColumn.Width = value;
         if (ScaleLabelColumn is not null) ScaleLabelColumn.Width = value;
     }
 
@@ -653,10 +564,9 @@ public partial class MainWindow : Window
 
     private IEnumerable<TextBlock> CollapsibleLabels() => new[]
     {
-        SectionTheme, RowPaletteLabel, RowWindowLabel, RowPanelLabel, RowViewLabel, RowAutoStartLabel,
-        RowAutoOutputLabel,
-        SectionCustom, RowAccentLabel, RowCaptionLabel, RowLayoutLabel,
-        RowFontLabel, RowInkLabel, RowBackgroundLabel, RowScaleLabel,
+        RowAutoStartLabel, RowAutoOutputLabel,
+        SectionCustom, RowLabelCaption, RowTextLabel,
+        RowFontLabel, RowInkLabel, RowBackgroundLabel, RowTextBrightnessLabel, RowScaleLabel,
         SectionMedia, MediaText, RecentLabel,
         SectionMyThemes, ThemesHint
     };
@@ -697,22 +607,26 @@ public partial class MainWindow : Window
     {
         if (sender is not ToggleButton tab) return;
 
-        ShowTab((tab.Tag as string) == "themes" ? "themes" : "settings");
+        ShowTab(tab.Tag as string ?? "settings");
     }
 
     private void ShowTab(string tab)
     {
-        var themes = tab == "themes";
+        var settings = tab == "settings";
+        var startup = tab == "startup";
+        var presets = tab == "presets";
 
-        SettingsPanel.Visibility = themes ? Visibility.Collapsed : Visibility.Visible;
-        ThemesPanel.Visibility = themes ? Visibility.Visible : Visibility.Collapsed;
+        SettingsPanel.Visibility = settings ? Visibility.Visible : Visibility.Collapsed;
+        StartupPanel.Visibility = startup ? Visibility.Visible : Visibility.Collapsed;
+        PresetsPanel.Visibility = presets ? Visibility.Visible : Visibility.Collapsed;
 
-        TabSettings.IsChecked = !themes;
-        TabThemes.IsChecked = themes;
+        TabSettings.IsChecked = settings;
+        TabStartup.IsChecked = startup;
+        TabPresets.IsChecked = presets;
 
         // Миниатюры рисуем при первом показе вкладки: к этому моменту датчики
         // уже прочитаны, и кадр в списке совпадает с тем, что видно на панели.
-        if (themes) _ = RefreshPresetPreviewsAsync();
+        if (presets) _ = RefreshPresetPreviewsAsync();
     }
 
     private void OnLangClick(object sender, RoutedEventArgs e)
@@ -788,9 +702,8 @@ public partial class MainWindow : Window
 
     private ThemeKind CurrentTheme => _theme;
 
-    /// <summary>Что рисовать: виды — это варианты «Монитора», а не свои темы.</summary>
-    private ThemeKind RenderKind() =>
-        _theme == ThemeKind.Monitor ? _monitorView : _theme;
+    /// <summary>Что рисовать: тема панели как есть.</summary>
+    private ThemeKind RenderKind() => _theme;
 
     private static bool IsOldDarkTheme(string? value) =>
         value is "MonitorDark" or "Чёрный" or "Черный";
@@ -809,32 +722,13 @@ public partial class MainWindow : Window
 
     private void SelectTheme(ThemeKind kind, bool apply)
     {
-        // Любой вид — не отдельная тема, а вариант «Монитора».
-        if (IsViewKind(kind))
-        {
-            _monitorView = kind;
-            kind = ThemeKind.Monitor;
-        }
-
         _theme = kind;
 
-        ToggleButton? selectedTile = null;
-        foreach (var (tile, tileKind) in _tiles)
-        {
-            var current = tileKind == kind;
-            tile.IsChecked = current;
-            if (current) selectedTile = tile;
-        }
-
-        UpdateViewButtons();
-        UpdatePanelButtons();
-        UpdateWidgetSelection();
+        BindWidgets();
         ApplyViewTransform();
-        PlaceGlass(animate: IsLoaded && _glassPlaced, target: selectedTile);
         ApplyBackdrop();
         UpdateMediaSection();
 
-        // В теме «Медиа» частота берётся у файла — ползунок темпа там не нужен вовсе.
         if (FpsBlock is not null)
             FpsBlock.Visibility = kind == ThemeKind.Media ? Visibility.Collapsed : Visibility.Visible;
 
@@ -847,7 +741,6 @@ public partial class MainWindow : Window
 
         if (IsLoaded) RenderFrame();
     }
-
     private void OnThemeTileClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton tile) return;
@@ -866,126 +759,13 @@ public partial class MainWindow : Window
     /// переезжает с вытягиванием по ходу движения — переход читается как жидкость,
     /// а не как ползунок.
     /// </summary>
-    private void PlaceGlass(bool animate, ToggleButton? target = null)
-    {
-        if (TileGlass is null || TileGlassLayer is null) return;
+    // ── Жидкое стекло под плитками тем ──────────────────────────────────────
 
-        target ??= CurrentTile();
-        if (target is null || target.ActualWidth <= 0) return;
-
-        var point = target.TranslatePoint(new Point(0, 0), TileGlassLayer);
-
-        if (!animate || !_glassPlaced)
-        {
-            StopGlassTracking();
-
-            TileGlass.BeginAnimation(Canvas.LeftProperty, null);
-            TileGlass.BeginAnimation(FrameworkElement.WidthProperty, null);
-            TileGlassScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
-
-            Canvas.SetLeft(TileGlass, point.X);
-            Canvas.SetTop(TileGlass, point.Y);
-            TileGlass.Width = target.ActualWidth;
-            TileGlass.Height = target.ActualHeight;
-            TileGlassScale.ScaleY = 1;
-
-            _glassPlaced = true;
-            SyncGlassClip();
-            return;
-        }
-
-        var fromX = Canvas.GetLeft(TileGlass);
-        if (double.IsNaN(fromX)) fromX = point.X;
-
-        var fromWidth = double.IsNaN(TileGlass.Width) ? target.ActualWidth : TileGlass.Width;
-        var targetWidth = target.ActualWidth;
-
-        // Чем дальше переезд, тем сильнее стекло вытягивается по ходу движения:
-        // на месте — ноль, через две плитки — максимум. Высота при этом проседает.
-        var stretch = Math.Min(0.22,
-            Math.Abs(point.X - fromX) / Math.Max(1.0, targetWidth) * 0.32);
-
-        var duration = TimeSpan.FromMilliseconds(360);
-        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-
-        var move = new DoubleAnimationUsingKeyFrames { Duration = duration };
-        move.KeyFrames.Add(new LinearDoubleKeyFrame(fromX, KeyTime.FromPercent(0)));
-        move.KeyFrames.Add(new EasingDoubleKeyFrame(point.X, KeyTime.FromPercent(1), easing));
-
-        // Ширина, а не ScaleX: тот же прямоугольник уходит в клип подписей,
-        // поэтому инверсия текста едет ровно по краю стекла.
-        var width = new DoubleAnimationUsingKeyFrames { Duration = duration };
-        width.KeyFrames.Add(new LinearDoubleKeyFrame(fromWidth, KeyTime.FromPercent(0)));
-        width.KeyFrames.Add(new EasingDoubleKeyFrame(targetWidth * (1 + stretch), KeyTime.FromPercent(0.34),
-            new CubicEase { EasingMode = EasingMode.EaseOut }));
-        width.KeyFrames.Add(new EasingDoubleKeyFrame(targetWidth, KeyTime.FromPercent(1), easing));
-
-        var squash = new DoubleAnimationUsingKeyFrames { Duration = TimeSpan.FromMilliseconds(480) };
-        squash.KeyFrames.Add(new LinearDoubleKeyFrame(TileGlassScale.ScaleY, KeyTime.FromPercent(0)));
-        squash.KeyFrames.Add(new EasingDoubleKeyFrame(1 - stretch * 0.8, KeyTime.FromPercent(0.3),
-            new CubicEase { EasingMode = EasingMode.EaseOut }));
-        squash.KeyFrames.Add(new EasingDoubleKeyFrame(1.03, KeyTime.FromPercent(0.62),
-            new CubicEase { EasingMode = EasingMode.EaseInOut }));
-        squash.KeyFrames.Add(new EasingDoubleKeyFrame(1, KeyTime.FromPercent(1),
-            new CubicEase { EasingMode = EasingMode.EaseOut }));
-
-        TileGlass.BeginAnimation(Canvas.LeftProperty, move);
-        TileGlass.BeginAnimation(FrameworkElement.WidthProperty, width);
-        TileGlassScale.BeginAnimation(ScaleTransform.ScaleYProperty, squash);
-
-        StartGlassTracking();
-    }
-
-    private ToggleButton? CurrentTile()
-    {
-        foreach (var (tile, kind) in _tiles)
-        {
-            if (kind == _theme) return tile;
-        }
-
-        return null;
-    }
-
-    /// <summary>Клип подписей должен совпадать со стеклом на каждом кадре анимации.</summary>
-    private void StartGlassTracking()
-    {
-        _glassTrackUntil = DateTime.UtcNow.AddMilliseconds(650);
-
-        if (_glassTracking) return;
-
-        _glassTracking = true;
-        CompositionTarget.Rendering += OnGlassRendering;
-    }
-
-    private void StopGlassTracking()
-    {
-        if (!_glassTracking) return;
-
-        _glassTracking = false;
-        CompositionTarget.Rendering -= OnGlassRendering;
-    }
-
-    private void OnGlassRendering(object? sender, EventArgs e)
-    {
-        SyncGlassClip();
-
-        if (DateTime.UtcNow >= _glassTrackUntil) StopGlassTracking();
-    }
-
-    private void SyncGlassClip()
-    {
-        if (TileGlass is null) return;
-
-        var x = Canvas.GetLeft(TileGlass);
-        var y = Canvas.GetTop(TileGlass);
-        if (double.IsNaN(x) || double.IsNaN(y)) return;
-
-        var rect = new Rect(x, y, TileGlass.Width, TileGlass.Height);
-
-        if (TileInvertClip is not null) TileInvertClip.Rect = rect;
-        if (TileHoleRect is not null) TileHoleRect.Rect = rect;
-    }
-
+    /// <summary>
+    /// Ставит стеклянную заливку под выбранную плитку. При переключении она
+    /// переезжает с вытягиванием по ходу движения — переход читается как жидкость,
+    /// а не как ползунок.
+    /// </summary>
     // ── Оформление ──────────────────────────────────────────────────────────
 
     /// <summary>Акцент приходит из сохранённой темы; отдельного выбора в окне нет.</summary>
@@ -996,45 +776,40 @@ public partial class MainWindow : Window
         _frameDirty = true;
     }
 
-    // ── Своё: акцент кадра и подпись ───────────────────────────────────────
+    // ── Вернуть всё к исходному виду ───────────────────────────────────────
 
-    private void OnAccentClick(object sender, RoutedEventArgs e)
+    /// <summary>Возврат к заводскому кадру: шрифт, цвет, фон, акцент, размеры и объекты.</summary>
+    private void OnRestoreDefaultsClick(object sender, RoutedEventArgs e)
     {
-        if (sender is not ToggleButton dot) return;
+        _panelFont = "Segoe UI";
+        ThemeRenderer.FontName = _panelFont;
 
-        SetAccent(ThemePreset.ToColor(dot.Tag as string));
-        UpdateAccentButtons();
+        _panelInk = "";
+        SetAccent(ThemeRenderer.DefaultAccent);
         ApplyInk();
+
+        _background = 50;
+        ThemeRenderer.BackgroundBrightness = 0.5;
+
+        _widgetBrightness = 100;
+        ThemeRenderer.WidgetBrightness = 1;
+
+        _transforms.Clear();
+        _selection.Clear();
+
+        // Раскладка — стартовые объекты во всех видах.
+        _layouts.Clear();
+        _widgets = LayoutFor(RenderKind());
+
+        FillFonts();
         UpdateInkButtons();
-        SaveSettings();
 
-        if (IsLoaded) RenderFrame();
-    }
+        if (BackgroundSlider is not null) BackgroundSlider.Value = _background;
+        if (TextBrightnessSlider is not null) TextBrightnessSlider.Value = _widgetBrightness;
 
-    /// <summary>Подсвечивает кружок, совпадающий с текущим акцентом.</summary>
-    private void UpdateAccentButtons()
-    {
-        if (AccentInk is null) return;
+        ApplyViewTransform();
+        UpdateWidgetSelection();
 
-        var dots = new[]
-        {
-            AccentInk, AccentRose, AccentOcean, AccentForest,
-            AccentAmber, AccentViolet, AccentCoral, AccentMint
-        };
-
-        var current = ThemePreset.ToHex(_accent);
-
-        foreach (var dot in dots)
-        {
-            dot.IsChecked = string.Equals(dot.Tag as string, current, StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    private void OnCaptionChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_loading) return;
-
-        _caption = CaptionBox.Text.Trim();
         _frameDirty = true;
         SaveSettings();
 
@@ -1049,39 +824,132 @@ public partial class MainWindow : Window
 
     private void OnAddWidgetClick(object sender, RoutedEventArgs e)
     {
-        if (AddWidgetButton?.ContextMenu is not { } menu) return;
+        if (AddMenuPopup is null) return;
 
-        menu.PlacementTarget = AddWidgetButton;
-        menu.Placement = PlacementMode.Bottom;
-        menu.IsOpen = true;
+        // Меню появляется по центру окна, чуть выше середины.
+        AddMenuPopup.PlacementTarget = this;
+        AddMenuPopup.Placement = PlacementMode.Center;
+        AddMenuPopup.HorizontalOffset = 0;
+        AddMenuPopup.VerticalOffset = -110;
+        AddMenuPopup.IsOpen = true;
+    }
+
+    /// <summary>Стекло в меню добавления переезжает к пункту под курсором.</summary>
+    private void OnAddMenuHover(object sender, MouseEventArgs e)
+    {
+        if (AddMenuGlass is null || AddMenuGlassLayer is null) return;
+        if (sender is not Button item) return;
+
+        var point = item.TranslatePoint(new Point(0, 0), AddMenuGlassLayer);
+
+        AddMenuGlass.Visibility = Visibility.Visible;
+        AddMenuGlass.Width = item.ActualWidth;
+        AddMenuGlass.Height = item.ActualHeight;
+
+        var from = Canvas.GetTop(AddMenuGlass);
+        var to = point.Y;
+
+        Canvas.SetLeft(AddMenuGlass, point.X);
+
+        if (double.IsNaN(from) || Math.Abs(from - to) < 0.5)
+        {
+            Canvas.SetTop(AddMenuGlass, to);
+            return;
+        }
+
+        var move = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(180))
+        {
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+
+        AddMenuGlass.BeginAnimation(Canvas.TopProperty, move);
     }
 
     private void OnAddWidgetType(object sender, RoutedEventArgs e)
     {
-        if (sender is not MenuItem item) return;
+        if (sender is not FrameworkElement item) return;
 
+        AddMenuPopup.IsOpen = false;
         AddWidget(item.Tag as string ?? "cpu");
+    }
+
+    /// <summary>Показывает поля ввода подписи и текста для выделенного объекта.</summary>
+    private void UpdateTextRow()
+    {
+        if (TextRow is null) return;
+
+        var single = _selection.Count == 1 ? _selection[0] : null;
+        var text = single?.Type == "text" ? single : null;
+        var labelled = single is not null && single.Type is not ("text" or "ring") ? single : null;
+
+        TextRow.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
+        if (LabelRow is not null)
+            LabelRow.Visibility = labelled is null ? Visibility.Collapsed : Visibility.Visible;
+
+        if (text is not null)
+        {
+            _syncingText = true;
+            WidgetTextBox.Text = text.Text ?? "";
+            _syncingText = false;
+        }
+
+        if (labelled is not null && WidgetLabelBox is not null)
+        {
+            _syncingText = true;
+            WidgetLabelBox.Text = labelled.Label ?? ThemeRenderer.LabelFor(_snapshot, labelled.Type);
+            _syncingText = false;
+        }
+    }
+
+    private void OnWidgetLabelChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingText || _selection.Count != 1) return;
+
+        var widget = _selection[0];
+        if (widget.Type is "text" or "ring") return;
+
+        var text = WidgetLabelBox.Text.Trim();
+
+        // Пустая строка — подпись убрать совсем, а не вернуть стандартную.
+        widget.Label = text;
+        PublishWidgets();
+        _frameDirty = true;
+        SaveSettingsSoon();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private void OnWidgetTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingText || _selection.Count != 1 || _selection[0].Type != "text") return;
+
+        _selection[0].Text = WidgetTextBox.Text;
+        PublishWidgets();
+        _frameDirty = true;
+        SaveSettingsSoon();
+
+        if (IsLoaded) RenderFrame();
     }
 
     private void AddWidget(string type)
     {
-        // Объекты видны только в своём кадре — на него и переключаемся.
-        if (RenderKind() != ThemeKind.Custom)
-        {
-            _monitorView = ThemeKind.Custom;
-            SelectTheme(ThemeKind.Custom, apply: false);
-        }
+        // Объекты живут в «Мониторе»; если открыта другая тема — переключаемся на него.
+        if (!PanelLayouts.IsObjectView(RenderKind()))
+            SelectTheme(ThemeKind.Monitor, apply: false);
 
         var index = _widgets.Count;
         var widget = new PanelWidget
         {
             Type = type,
+            Text = type == "text" ? "Текст" : null,
             X = Math.Clamp(24 + index * 10, 0, ThemeRenderer.Width - ThemeRenderer.WidgetWidth),
             Y = Math.Clamp(44 + index * 12, 0, ThemeRenderer.Height - ThemeRenderer.WidgetHeight)
         };
 
         _widgets.Add(widget);
-        _selectedWidget = widget;
+
+        _selection.Clear();
+        _selection.Add(widget);
 
         PublishWidgets();
         UpdateWidgetSelection();
@@ -1089,16 +957,30 @@ public partial class MainWindow : Window
         SaveSettings();
 
         if (IsLoaded) RenderFrame();
+
+        if (type == "text" && WidgetTextBox is not null)
+        {
+            WidgetTextBox.Focus();
+            WidgetTextBox.SelectAll();
+        }
     }
 
     private void OnRemoveWidgetClick(object sender, RoutedEventArgs e) => RemoveSelectedWidget();
 
     private void RemoveSelectedWidget()
     {
-        if (_selectedWidget is null) return;
+        // Ничего не выделено — удаляем последний объект, чтобы кнопка работала.
+        var targets = _selection.Count > 0 ? _selection.ToList() : new List<PanelWidget>();
 
-        _widgets.Remove(_selectedWidget);
-        _selectedWidget = null;
+        if (targets.Count == 0 && _widgets.LastOrDefault() is { } last)
+            targets.Add(last);
+
+        if (targets.Count == 0) return;
+
+        foreach (var target in targets)
+            _widgets.Remove(target);
+
+        _selection.Clear();
 
         PublishWidgets();
         UpdateWidgetSelection();
@@ -1108,54 +990,103 @@ public partial class MainWindow : Window
         if (IsLoaded) RenderFrame();
     }
 
-    /// <summary>Выделение: пунктирная рамка поверх превью, ровно по габаритам объекта.</summary>
+    /// <summary>Рамки выделения поверх превью и переключение доступных настроек.</summary>
     private void UpdateWidgetSelection()
     {
-        if (WidgetSelection is null) return;
+        if (WidgetOverlay is null) return;
 
-        var show = _selectedWidget is not null && RenderKind() == ThemeKind.Custom;
-        WidgetSelection.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        // Мусорные выделения (объект удалили, вид сменили) не держим.
+        _selection.RemoveAll(widget => !_widgets.Contains(widget));
 
-        if (show && _selectedWidget is { } widget)
+        // Старые рамки убираем, рамка-выделение остаётся первой.
+        for (var i = WidgetOverlay.Children.Count - 1; i >= 0; i--)
         {
-            var rect = ThemeRenderer.WidgetBounds(widget);
-
-            Canvas.SetLeft(WidgetSelection, rect.X - 3);
-            Canvas.SetTop(WidgetSelection, rect.Y - 3);
-            WidgetSelection.Width = rect.Width + 6;
-            WidgetSelection.Height = rect.Height + 6;
+            if (!ReferenceEquals(WidgetOverlay.Children[i], MarqueeRect))
+                WidgetOverlay.Children.RemoveAt(i);
         }
 
-        if (RemoveWidgetButton is not null)
+        var isCustom = PanelLayouts.IsObjectView(RenderKind());
+
+        if (isCustom)
         {
-            var canRemove = _selectedWidget is not null;
-            RemoveWidgetButton.IsEnabled = canRemove;
-            RemoveWidgetButton.Opacity = canRemove ? 1.0 : 0.4;
+            foreach (var widget in _selection)
+            {
+                var rect = ThemeRenderer.WidgetBounds(widget, _snapshot);
+
+                var box = new Border
+                {
+                    Width = rect.Width + 6,
+                    Height = rect.Height + 6,
+                    BorderThickness = new Thickness(1),
+                    CornerRadius = new CornerRadius(3),
+                    BorderBrush = (Brush)FindResource("Rose"),
+                    IsHitTestVisible = false
+                };
+
+                Canvas.SetLeft(box, rect.X - 3);
+                Canvas.SetTop(box, rect.Y - 3);
+                WidgetOverlay.Children.Add(box);
+            }
         }
+
+        var canEdit = isCustom && _selection.Count > 0;
+
+        // Без выделения цвет и шрифт не меняются вовсе.
+        foreach (var dot in new[] { InkDefault, InkGrey, InkAccentDot, InkCustomDot })
+        {
+            if (dot is null) continue;
+            dot.IsEnabled = canEdit;
+            dot.Opacity = canEdit ? 1.0 : 0.4;
+        }
+
+        if (FontPicker is not null)
+        {
+            FontPicker.IsEnabled = canEdit;
+            FontPicker.Opacity = canEdit ? 1.0 : 0.4;
+        }
+
+
+
+
+
+        ApplyViewTransform();
+        SyncFontPicker();
+        UpdateInkButtons();
+        UpdateTextRow();
     }
 
-    /// <summary>Первый заход в свой вид: четыре базовых объекта, чтобы было что двигать.</summary>
-    private void EnsureStarterLayout()
-    {
-        if (_widgets.Count > 0) return;
 
-        _widgets.Add(new PanelWidget { Type = "cpu", X = 24, Y = 44 });
-        _widgets.Add(new PanelWidget { Type = "ram", X = 176, Y = 44 });
-        _widgets.Add(new PanelWidget { Type = "gpu", X = 24, Y = 116 });
-        _widgets.Add(new PanelWidget { Type = "uptime", X = 176, Y = 116 });
+    /// <summary>Раскладка вида: сохранённая или стартовая.</summary>
+    private List<PanelWidget> LayoutFor(ThemeKind kind)
+    {
+        if (_layouts.TryGetValue(kind, out var saved)) return saved;
+
+        var created = PanelLayouts.Defaults(kind);
+        _layouts[kind] = created;
+        return created;
+    }
+
+    /// <summary>Подхватывает раскладку текущего вида.</summary>
+    private void BindWidgets()
+    {
+        var kind = RenderKind();
+
+        _widgets = PanelLayouts.IsObjectView(kind) ? LayoutFor(kind) : new List<PanelWidget>();
+        _selection.Clear();
 
         PublishWidgets();
-        _frameDirty = true;
-        SaveSettings();
+        UpdateWidgetSelection();
     }
-
     // Перетаскивание: координаты мыши приходят в пикселях кадра 320×240,
     // потому что картинка живёт в своей сетке и растягивается вьюбоксом.
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
+        // Клавиатурный фокус — на превью, чтобы Delete удалял выделенные объекты.
+        Preview.Focus();
+
         var point = e.GetPosition(Preview);
 
-        if (RenderKind() != ThemeKind.Custom)
+        if (!PanelLayouts.IsObjectView(RenderKind()))
         {
             // В готовых видах тащим всё содержимое кадра: рамка остаётся на месте.
             _movingView = true;
@@ -1166,20 +1097,36 @@ public partial class MainWindow : Window
             return;
         }
 
-        _selectedWidget = null;
+        // Клик по объекту: если он уже выделен — тащим всё выделение, иначе только его.
+        var hit = _widgets.LastOrDefault(widget => ThemeRenderer.WidgetBounds(widget, _snapshot).Contains(point));
 
-        for (var i = _widgets.Count - 1; i >= 0; i--)
+        if (hit is null)
         {
-            var widget = _widgets[i];
-
-            if (!ThemeRenderer.WidgetBounds(widget).Contains(point)) continue;
-
-            _selectedWidget = widget;
-            _dragOffset = new Point(point.X - widget.X, point.Y - widget.Y);
-            _dragging = true;
+            // Пустое место: начинаем рамку выделения.
+            _selection.Clear();
+            _marquee = true;
+            _marqueeStart = point;
+            ShowMarquee(point, point);
             Preview.CaptureMouse();
-            break;
+            UpdateWidgetSelection();
+            return;
         }
+
+        if (!_selection.Contains(hit))
+        {
+            _selection.Clear();
+            _selection.Add(hit);
+        }
+
+        _dragOrigins.Clear();
+        foreach (var widget in _selection)
+            _dragOrigins[widget] = new Point(widget.X, widget.Y);
+
+        _dragStart = point;
+        _dragging = true;
+        Preview.CaptureMouse();
+
+        if (GridOverlay is not null) GridOverlay.Visibility = Visibility.Visible;
 
         UpdateWidgetSelection();
     }
@@ -1190,6 +1137,8 @@ public partial class MainWindow : Window
         {
             _movingView = false;
             _dragging = false;
+            _marquee = false;
+            HideMarquee();
             return;
         }
 
@@ -1204,12 +1153,33 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (!_dragging || _selectedWidget is not { } widget) return;
+        if (_marquee)
+        {
+            ShowMarquee(_marqueeStart, e.GetPosition(Preview));
+            return;
+        }
+
+        if (!_dragging || _selection.Count == 0) return;
 
         var position = e.GetPosition(Preview);
+        var dx = position.X - _dragStart.X;
+        var dy = position.Y - _dragStart.Y;
 
-        widget.X = Math.Clamp(position.X - _dragOffset.X, 0, ThemeRenderer.Width - ThemeRenderer.WidgetWidth);
-        widget.Y = Math.Clamp(position.Y - _dragOffset.Y, 0, ThemeRenderer.Height - ThemeRenderer.WidgetHeight);
+        // Двигаем всё выделение одним куском, не выпуская за кадр.
+        foreach (var widget in _selection)
+        {
+            if (!_dragOrigins.TryGetValue(widget, out var origin)) continue;
+
+            var box = ThemeRenderer.WidgetBounds(widget, _snapshot);
+            var offset = ThemeRenderer.LabelOffset(widget);
+
+            // Притягиваем к сетке 16 px — так объекты встают ровно.
+            var x = Snap(origin.X + dx);
+            var y = Snap(origin.Y + dy);
+
+            widget.X = Math.Clamp(x, 0, Math.Max(0, ThemeRenderer.Width - box.Width));
+            widget.Y = Math.Clamp(y, -offset, Math.Max(-offset, ThemeRenderer.Height - box.Height));
+        }
 
         PublishWidgets();
         UpdateWidgetSelection();
@@ -1218,17 +1188,109 @@ public partial class MainWindow : Window
         if (IsLoaded) RenderFrame();
     }
 
+    private const double GridStep = 8;
+
+    private static double Snap(double value) => Math.Round(value / GridStep) * GridStep;
+
+    /// <summary>Рамка выделения: тянется по пустому месту и обводит объекты.</summary>
+    private void ShowMarquee(Point from, Point to)
+    {
+        if (MarqueeRect is null) return;
+
+        var x = Math.Min(from.X, to.X);
+        var y = Math.Min(from.Y, to.Y);
+        var width = Math.Abs(to.X - from.X);
+        var height = Math.Abs(to.Y - from.Y);
+
+        MarqueeRect.Visibility = Visibility.Visible;
+        Canvas.SetLeft(MarqueeRect, x);
+        Canvas.SetTop(MarqueeRect, y);
+        MarqueeRect.Width = width;
+        MarqueeRect.Height = height;
+    }
+
+    private void HideMarquee()
+    {
+        if (MarqueeRect is not null) MarqueeRect.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Завершает рамку: в выделение попадают все пересечённые объекты.</summary>
+    private void FinishMarquee()
+    {
+        if (MarqueeRect is null) return;
+
+        var rect = new Rect(Canvas.GetLeft(MarqueeRect), Canvas.GetTop(MarqueeRect),
+            Math.Max(0, MarqueeRect.Width), Math.Max(0, MarqueeRect.Height));
+
+        _selection.Clear();
+
+        foreach (var widget in _widgets)
+        {
+            if (ThemeRenderer.WidgetBounds(widget, _snapshot).IntersectsWith(rect))
+                _selection.Add(widget);
+        }
+
+        HideMarquee();
+        UpdateWidgetSelection();
+    }
+
     private void OnPreviewMouseUp(object sender, MouseButtonEventArgs e) => EndDrag();
 
     private void OnPreviewMouseLeave(object sender, MouseEventArgs e) => EndDrag();
 
+    /// <summary>Отпускание мыши где угодно завершает и перетаскивание, и рамку.</summary>
+    protected override void OnPreviewMouseUp(MouseButtonEventArgs e)
+    {
+        base.OnPreviewMouseUp(e);
+
+        if (_marquee || _dragging || _movingView) EndDrag();
+    }
+
+    /// <summary>Окно потеряло фокус — рамка выделения не должна висеть.</summary>
+    protected override void OnDeactivated(EventArgs e)
+    {
+        base.OnDeactivated(e);
+
+        if (_marquee)
+        {
+            _marquee = false;
+            HideMarquee();
+            Preview.ReleaseMouseCapture();
+        }
+    }
+
+    /// <summary>Delete убирает выделенные объекты.</summary>
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        base.OnPreviewKeyDown(e);
+
+        if (e.Key != Key.Delete || _selection.Count == 0) return;
+
+        // В полях ввода Delete должен стирать текст, а не объекты.
+        if (Keyboard.FocusedElement is TextBox or ComboBox) return;
+
+        RemoveSelectedWidget();
+        e.Handled = true;
+    }
+
     private void EndDrag()
     {
+        if (_marquee)
+        {
+            _marquee = false;
+            FinishMarquee();
+            Preview.ReleaseMouseCapture();
+            return;
+        }
+
         if (!_dragging && !_movingView) return;
 
         _dragging = false;
         _movingView = false;
         Preview.ReleaseMouseCapture();
+
+        if (GridOverlay is not null) GridOverlay.Visibility = Visibility.Collapsed;
+
         SaveSettings();
     }
 
@@ -1240,6 +1302,7 @@ public partial class MainWindow : Window
 
         var names = Fonts.SystemFontFamilies
             .Select(family => family.Source)
+            .Where(name => !SymbolFonts.Contains(name))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
             .ToList();
@@ -1250,19 +1313,48 @@ public partial class MainWindow : Window
             ?? names.FirstOrDefault();
     }
 
-    /// <summary>Цвет текста кадра: тушь темы, белый, серый или акцент.</summary>
+    /// <summary>
+    /// Шрифты-пиктограммы: в списке они выглядят набором значков и для текста
+    /// кадра бесполезны, поэтому в выборе их нет.
+    /// </summary>
+    private static readonly HashSet<string> SymbolFonts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Wingdings",
+        "Wingdings 2",
+        "Wingdings 3",
+        "Webdings",
+        "Symbol",
+        "Marlett",
+        "Bookshelf Symbol 7",
+        "MS Reference Specialty",
+        "Segoe MDL2 Assets",
+        "Segoe Fluent Icons",
+        "Segoe UI Emoji",
+        "Segoe UI Historic",
+        "Segoe UI Symbol"
+    };
+
+    /// <summary>Цвет текста кадра: тушь темы, серый или акцент.</summary>
     private void ApplyInk()
     {
         ThemeRenderer.InkColor = _panelInk switch
         {
-            "light" => Colors.White,
+            "" => null,
             "grey" => Color.FromRgb(0x9A, 0xA0, 0xA6),
             "accent" => _accent,
-            _ => null
+            _ => ThemePreset.ToColor(_panelInk)
         };
 
         if (InkAccentDot is not null)
             InkAccentDot.Background = new SolidColorBrush(_accent);
+
+        // Кружок «тушь темы» показывает настоящий цвет туши выбранной панели.
+        if (InkDefault is not null)
+        {
+            InkDefault.Background = new SolidColorBrush(_panelDark
+                ? Color.FromRgb(0xED, 0xEA, 0xE3)
+                : Color.FromRgb(0x10, 0x10, 0x12));
+        }
 
         _frameDirty = true;
     }
@@ -1271,31 +1363,341 @@ public partial class MainWindow : Window
     {
         if (InkDefault is null) return;
 
-        InkDefault.IsChecked = _panelInk.Length == 0;
-        InkLight.IsChecked = _panelInk == "light";
-        InkGrey.IsChecked = _panelInk == "grey";
-        InkAccentDot.IsChecked = _panelInk == "accent";
+        // Показываем цвет первого выделенного объекта; без выделения — ничего не выбрано.
+        var ink = _selection.FirstOrDefault()?.Ink;
+
+        var mode = !string.IsNullOrWhiteSpace(ink) ? ColourMode(ink) : "";
+
+        InkDefault.IsChecked = _selection.Count > 0 && mode.Length == 0;
+        InkGrey.IsChecked = _selection.Count > 0 && mode == "grey";
+        InkAccentDot.IsChecked = _selection.Count > 0 && mode == "accent";
+        InkCustomDot.IsChecked = _selection.Count > 0 && mode.StartsWith("#", StringComparison.Ordinal);
+    }
+
+    /// <summary>Сводит цвет к режиму строки «Цвет»: тушь, серый, акцент или свой.</summary>
+    private string ColourMode(string hex)
+    {
+        if (string.Equals(hex, "#9AA0A6", StringComparison.OrdinalIgnoreCase)) return "grey";
+        if (string.Equals(hex, ThemePreset.ToHex(_accent), StringComparison.OrdinalIgnoreCase)) return "accent";
+
+        return hex;
+    }
+
+    /// <summary>Наведение на шрифт в списке — живой пример на выделенных объектах.</summary>
+    private void OnFontItemHover(object sender, MouseEventArgs e)
+    {
+        if (sender is not ComboBoxItem item || item.DataContext is not string family) return;
+
+        PreviewFontOnSelection(family);
+    }
+
+    /// <summary>То же, но по движению мыши: пункты списка живут в отдельном окне попапа.</summary>
+    private void OnFontPreviewMove(object sender, MouseEventArgs e)
+    {
+        if (!FontPicker.IsDropDownOpen) return;
+
+        var item = FindAncestorItem(e.OriginalSource as DependencyObject);
+
+        if (item?.DataContext is string family)
+            PreviewFontOnSelection(family);
+    }
+
+    private void OnFontDropDownOpened(object? sender, EventArgs e)
+    {
+        // Открыли список заново — прошлый «пример» уже откатили.
+        _fontPreview.Clear();
+    }
+
+    private static ComboBoxItem? FindAncestorItem(DependencyObject? node)
+    {
+        while (node is not null)
+        {
+            if (node is ComboBoxItem item) return item;
+
+            node = node is Visual or System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(node)
+                : LogicalTreeHelper.GetParent(node);
+        }
+
+        return null;
+    }
+
+    /// <summary>Показывает шрифт на выделенных объектах, не сохраняя выбор.</summary>
+    private void PreviewFontOnSelection(string family)
+    {
+        if (_selection.Count == 0) return;
+
+        if (_fontPreview.Count == 0)
+        {
+            foreach (var widget in _selection)
+                _fontPreview[widget] = widget.Font;
+        }
+
+        var changed = false;
+
+        foreach (var widget in _selection)
+        {
+            if (widget.Font == family) continue;
+            widget.Font = family;
+            changed = true;
+        }
+
+        if (!changed) return;
+
+        PublishWidgets();
+        _frameDirty = true;
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    /// <summary>Список закрыли, ничего не выбрав — возвращаем прежние шрифты.</summary>
+    private void OnFontDropDownClosed(object? sender, EventArgs e)
+    {
+        if (_fontPreview.Count == 0) return;
+
+        foreach (var pair in _fontPreview)
+            pair.Key.Font = pair.Value;
+
+        _fontPreview.Clear();
+
+        PublishWidgets();
+        _frameDirty = true;
+        SyncFontPicker();
+
+        if (IsLoaded) RenderFrame();
     }
 
     private void OnFontChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_loading || FontPicker.SelectedItem is not string family) return;
+        if (_loading || _syncingFont || FontPicker.SelectedItem is not string family) return;
 
-        _panelFont = family;
-        ThemeRenderer.FontName = family;
-        _frameDirty = true;
-        SaveSettings();
+        // Шрифт меняется только у выделенных объектов; без выделения ползунок неактивен.
+        if (_selection.Count == 0) return;
 
-        if (IsLoaded) RenderFrame();
+        _fontPreview.Clear();
+
+        foreach (var widget in _selection)
+            widget.Font = family;
+
+        CommitWidgets();
+    }
+
+    /// <summary>Ползунок шрифта показывает шрифт выбранного объекта или кадра.</summary>
+    private void SyncFontPicker()
+    {
+        if (FontPicker?.ItemsSource is not IEnumerable<string> names) return;
+
+        var family = _selection.FirstOrDefault()?.Font ?? _panelFont;
+        var match = names.FirstOrDefault(n => string.Equals(n, family, StringComparison.OrdinalIgnoreCase));
+
+        _syncingFont = true;
+        FontPicker.SelectedItem = match;
+        _syncingFont = false;
     }
 
     private void OnInkClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton dot) return;
+        if (_selection.Count == 0) return;
 
-        _panelInk = dot.Tag as string ?? "";
-        ApplyInk();
+        var mode = dot.Tag as string ?? "";
+
+        var ink = mode switch
+        {
+            "grey" => "#9AA0A6",
+            "accent" => ThemePreset.ToHex(_accent),
+            _ => null
+        };
+
+        foreach (var widget in _selection)
+            widget.Ink = ink;
+
+        PublishWidgets();
+        UpdateWidgetSelection();
+        _frameDirty = true;
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
         UpdateInkButtons();
+    }
+
+    /// <summary>Радужный кружок: любой цвет через системную палитру.</summary>
+    /// <summary>Радужный кружок: открывает свою палитру.</summary>
+    private void OnInkPick(object sender, RoutedEventArgs e) => OpenColorPicker();
+
+    /// <summary>
+    /// Своя палитра: слева квадрат «насыщенность × яркость» (сверху белое,
+    /// снизу чёрное), справа вертикальная линейка оттенков.
+    /// </summary>
+    private void OpenColorPicker()
+    {
+        if (_selection.Count == 0) return;
+
+        var start = _selection.FirstOrDefault()?.Ink is { Length: > 0 } own
+            ? ThemePreset.ToColor(own)
+            : _panelInk switch
+            {
+                "grey" => Color.FromRgb(0x9A, 0xA0, 0xA6),
+                "accent" => _accent,
+                _ => _accent
+            };
+
+        var (h, s, v) = ToHsv(start);
+
+        _hue = h;
+        _saturation = s;
+        _value = v;
+
+        UpdateColorPicker();
+        ColorPopup.IsOpen = true;
+    }
+
+    /// <summary>Перекрашивает квадрат под текущий оттенок и ставит кружок на место.</summary>
+    private void UpdateColorPicker()
+    {
+        if (ColorHueBase is null || ColorSquare is null) return;
+
+        var hueColor = FromHsv(_hue, 1, 1);
+
+        // Квадрат: слева белое, справа чистый оттенок, снизу чёрное.
+        ColorHueBase.Fill = new LinearGradientBrush(Colors.White, hueColor, 0);
+
+        Canvas.SetLeft(ColorCursor, _saturation * ColorSquare.ActualWidth - 6);
+        Canvas.SetTop(ColorCursor, (1 - _value) * ColorSquare.ActualHeight - 6);
+
+        if (HueCursor is not null && HueStrip is not null)
+            Canvas.SetTop(HueCursor, _hue / 360 * HueStrip.ActualHeight - 2);
+
+        ColorPreview.Fill = new SolidColorBrush(FromHsv(_hue, _saturation, _value));
+    }
+
+    private void OnColorSquareDown(object sender, MouseButtonEventArgs e)
+    {
+        _pickingSquare = true;
+        ColorSquare.CaptureMouse();
+        PickFromSquare(e);
+    }
+
+    private void OnColorSquareMove(object sender, MouseEventArgs e)
+    {
+        if (_pickingSquare) PickFromSquare(e);
+    }
+
+    private void OnColorSquareUp(object sender, MouseButtonEventArgs e)
+    {
+        _pickingSquare = false;
+        ColorSquare.ReleaseMouseCapture();
+    }
+
+    private void PickFromSquare(MouseEventArgs e)
+    {
+        var point = e.GetPosition(ColorSquare);
+        var width = Math.Max(1, ColorSquare.ActualWidth);
+        var height = Math.Max(1, ColorSquare.ActualHeight);
+
+        _saturation = Math.Clamp(point.X / width, 0, 1);
+        _value = 1 - Math.Clamp(point.Y / height, 0, 1);
+
+        UpdateColorPicker();
+        ApplyPickedColor();
+    }
+
+    private void OnHueDown(object sender, MouseButtonEventArgs e)
+    {
+        _pickingHue = true;
+        HueStrip.CaptureMouse();
+        PickFromHue(e);
+    }
+
+    private void OnHueMove(object sender, MouseEventArgs e)
+    {
+        if (_pickingHue) PickFromHue(e);
+    }
+
+    private void OnHueUp(object sender, MouseButtonEventArgs e)
+    {
+        _pickingHue = false;
+        HueStrip.ReleaseMouseCapture();
+    }
+
+    private void PickFromHue(MouseEventArgs e)
+    {
+        var point = e.GetPosition(HueStrip);
+        var height = Math.Max(1, HueStrip.ActualHeight);
+
+        _hue = Math.Clamp(point.Y / height, 0, 0.999) * 360;
+
+        UpdateColorPicker();
+        ApplyPickedColor();
+    }
+
+    /// <summary>Применяет выбранный цвет выделенным объектам.</summary>
+    private void ApplyPickedColor()
+    {
+        if (_selection.Count == 0) return;
+
+        var color = FromHsv(_hue, _saturation, _value);
+        var hex = ThemePreset.ToHex(color);
+
+        foreach (var widget in _selection)
+            widget.Ink = hex;
+
+        PublishWidgets();
+        UpdateWidgetSelection();
+        _frameDirty = true;
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+        UpdateInkButtons();
+    }
+
+    private static (double H, double S, double V) ToHsv(Color color)
+    {
+        double r = color.R / 255.0, g = color.G / 255.0, b = color.B / 255.0;
+        var max = Math.Max(r, Math.Max(g, b));
+        var min = Math.Min(r, Math.Min(g, b));
+        var delta = max - min;
+
+        double hue = 0;
+
+        if (delta > 0)
+        {
+            if (max == r) hue = 60 * (((g - b) / delta + 6) % 6);
+            else if (max == g) hue = 60 * ((b - r) / delta + 2);
+            else hue = 60 * ((r - g) / delta + 4);
+        }
+
+        return (hue, max <= 0 ? 0 : delta / max, max);
+    }
+
+    private static Color FromHsv(double hue, double saturation, double value)
+    {
+        var h = ((hue % 360) + 360) % 360;
+        var c = value * saturation;
+        var x = c * (1 - Math.Abs(h / 60 % 2 - 1));
+        var m = value - c;
+
+        var (r, g, b) = h switch
+        {
+            < 60 => (c, x, 0.0),
+            < 120 => (x, c, 0.0),
+            < 180 => (0.0, c, x),
+            < 240 => (0.0, x, c),
+            < 300 => (x, 0.0, c),
+            _ => (c, 0.0, x)
+        };
+
+        return Color.FromRgb(
+            (byte)Math.Round((r + m) * 255),
+            (byte)Math.Round((g + m) * 255),
+            (byte)Math.Round((b + m) * 255));
+    }
+
+    /// <summary>Сохраняет изменения объекта и перерисовывает кадр.</summary>
+    private void CommitWidgets()    {
+        PublishWidgets();
+        UpdateWidgetSelection();
+        _frameDirty = true;
         SaveSettings();
 
         if (IsLoaded) RenderFrame();
@@ -1308,14 +1710,42 @@ public partial class MainWindow : Window
         _background = (int)Math.Round(e.NewValue);
         ThemeRenderer.BackgroundBrightness = _background / 100.0;
         _frameDirty = true;
-        SaveSettings();
+        SaveSettingsSoon();
 
         if (IsLoaded) RenderFrame();
     }
 
-    private void OnScaleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    private void OnTextBrightnessChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
+        if (_loading) return;
+
+        _widgetBrightness = (int)Math.Round(e.NewValue);
+        ThemeRenderer.WidgetBrightness = _widgetBrightness / 100.0;
+        _frameDirty = true;
+        SaveSettingsSoon();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private void OnScaleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)    {
         if (_loading || _syncingScale) return;
+
+        // В «Своём» масштаб относится к выделенным объектам, в остальных видах — ко всему кадру.
+        if (PanelLayouts.IsObjectView(RenderKind()))
+        {
+            if (_selection.Count == 0) return;
+
+            foreach (var widget in _selection)
+                widget.Scale = e.NewValue / 100.0;
+
+            PublishWidgets();
+            UpdateWidgetSelection();
+            _frameDirty = true;
+            SaveSettings();
+
+            if (IsLoaded) RenderFrame();
+            return;
+        }
 
         var transform = CurrentTransform();
         transform.Scale = e.NewValue / 100.0;
@@ -1324,6 +1754,28 @@ public partial class MainWindow : Window
 
     private void OnResetViewClick(object sender, RoutedEventArgs e)
     {
+        // В «Своём» сброс возвращает размер выделенным объектам (или всем сразу).
+        if (PanelLayouts.IsObjectView(RenderKind()))
+        {
+            if (_selection.Count > 0)
+            {
+                foreach (var widget in _selection)
+                    widget.Scale = 1;
+            }
+            else
+            {
+                foreach (var item in _widgets) item.Scale = 1;
+            }
+
+            PublishWidgets();
+            UpdateWidgetSelection();
+            _frameDirty = true;
+            SaveSettings();
+
+            if (IsLoaded) RenderFrame();
+            return;
+        }
+
         _transforms.Remove(RenderKind());
         ApplyViewTransform();
         SaveSettings();
@@ -1341,7 +1793,7 @@ public partial class MainWindow : Window
 
         ThemeRenderer.Transform = transform;
         _frameDirty = true;
-        SaveSettings();
+        SaveSettingsSoon();
 
         if (IsLoaded) RenderFrame();
     }
@@ -1349,13 +1801,31 @@ public partial class MainWindow : Window
     /// <summary>Подтягивает сдвиг вида: свой у каждого вида, свой и ползунок масштаба.</summary>
     private void ApplyViewTransform()
     {
-        var transform = CurrentTransform();
-        ThemeRenderer.Transform = transform;
-
         if (ScaleSlider is null) return;
 
         _syncingScale = true;
-        ScaleSlider.Value = Math.Clamp(transform.Scale * 100, ScaleSlider.Minimum, ScaleSlider.Maximum);
+
+        if (PanelLayouts.IsObjectView(RenderKind()))
+        {
+            // В «Своём» ползунок масштаба меняет размер выделенных объектов.
+            var has = _selection.Count > 0;
+            var scale = has ? _selection[0].Scale : 1;
+
+            ScaleSlider.IsEnabled = has;
+            ScaleSlider.Opacity = has ? 1.0 : 0.4;
+            ScaleSlider.Value = Math.Clamp(scale * 100, ScaleSlider.Minimum, ScaleSlider.Maximum);
+            ThemeRenderer.Transform = new ViewTransform();
+        }
+        else
+        {
+            var transform = CurrentTransform();
+            ScaleSlider.IsEnabled = true;
+            ScaleSlider.Opacity = 1.0;
+            ScaleSlider.Value = Math.Clamp(transform.Scale * 100,
+                ScaleSlider.Minimum, ScaleSlider.Maximum);
+            ThemeRenderer.Transform = transform;
+        }
+
         _syncingScale = false;
     }
 
@@ -1379,10 +1849,12 @@ public partial class MainWindow : Window
     private void RefreshEffectiveFps()
     {
         var isMedia = CurrentTheme == ThemeKind.Media && _clip is not null;
-        var mediaFps = isMedia ? _clip!.NativeFps : 0;
 
-        _effectiveFps = mediaFps > 0
-            ? (int)Math.Clamp(Math.Round(mediaFps), 1, MaxMediaFps)
+        // Для «Медиа» ритм задаёт файл; в остальных видах — всегда ползунок,
+        // даже если на фоне GIF или видео: анимация идёт своим темпом,
+        // а панель обновляется с выбранной частотой.
+        _effectiveFps = isMedia
+            ? (int)Math.Clamp(Math.Round(_clip!.NativeFps), 1, MaxMediaFps)
             : _sliderFps;
 
         if (FpsSlider is not null)
@@ -1392,7 +1864,7 @@ public partial class MainWindow : Window
     private void OnFpsChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         ApplyFrameRate();
-        SaveSettings();
+        SaveSettingsSoon();
     }
 
     /// <summary>
@@ -1416,7 +1888,15 @@ public partial class MainWindow : Window
     private void OnBrightnessChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         ApplyBrightness();
-        SaveSettings();
+        SaveSettingsSoon();
+    }
+
+    private void SaveSettingsSoon()
+    {
+        if (_loading) return;
+
+        _saveDelay.Stop();
+        _saveDelay.Start();
     }
 
     private void SaveSettings()
@@ -1429,13 +1909,14 @@ public partial class MainWindow : Window
         _settings.Fps = (int)Math.Round(FpsSlider.Value);
         _settings.Brightness = BrightnessSlider is null ? _brightness : (int)Math.Round(BrightnessSlider.Value);
         _settings.Theme = _theme.ToString();
-        _settings.MonitorView = _monitorView.ToString();
         _settings.Accent = ThemePreset.ToHex(_accent);
-        _settings.Caption = _caption;
         _settings.Layout = _widgets.Select(widget => widget.Clone()).ToList();
+        _settings.Layouts = _layouts.ToDictionary(pair => pair.Key.ToString(),
+            pair => pair.Value.Select(widget => widget.Clone()).ToList());
         _settings.PanelFont = _panelFont;
         _settings.PanelInk = _panelInk;
         _settings.Background = _background;
+        _settings.WidgetBrightness = _widgetBrightness;
         _settings.Transforms = _transforms.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value.Clone());
         _settings.UiTheme = _skin;
         _settings.PanelDark = _panelDark;
@@ -1538,16 +2019,12 @@ public partial class MainWindow : Window
                 BrightnessSlider.Minimum, BrightnessSlider.Maximum);
 
             SetAccent(ThemePreset.ToColor(preset.Accent));
-            UpdateAccentButtons();
             ApplyInk();
             UpdateInkButtons();
             PresetNameBox.Text = preset.Name;
 
             _panelDark = preset.Dark;
-            UpdatePanelButtons();
-
-            _monitorView = IsViewKind(preset.ToKind()) ? preset.ToKind() : ThemeKind.Monitor;
-
+    
             SelectTheme(preset.ToKind(), apply: false);
         }
         finally
@@ -1717,7 +2194,11 @@ public partial class MainWindow : Window
             if (_clip is VideoClip video && video.TakeError() is { } videoError)
                 SetLog("log.video", videoError);
 
-            var frame = ThemeRenderer.Render(theme, _snapshot, _clip, _accent, _caption, _panelDark, _backdrop);
+            var backdrop = _backdropClip is { } clip
+                ? SurfaceImage.ToBitmap(clip.Render())
+                : _backdrop;
+
+            var frame = ThemeRenderer.Render(theme, _snapshot, _clip, _accent, null, _panelDark, backdrop);
             Volatile.Write(ref _frame, frame);
 
             if (IsVisible)
@@ -1871,7 +2352,7 @@ public partial class MainWindow : Window
         var dialog = new OpenFileDialog
         {
             Title = Loc.T("backdrop.dialog"),
-            Filter = MediaClipFactory.ImageFilter,
+            Filter = MediaClipFactory.BackdropFilter,
             CheckFileExists = true
         };
 
@@ -1887,8 +2368,26 @@ public partial class MainWindow : Window
     /// <summary>Подхватывает сохранённый фон; он общий для «Монитора» и «Часов».</summary>
     private void ApplyBackdrop()
     {
+        _backdropClip?.Dispose();
+        _backdropClip = null;
+
         _backdropPath = _settings.Backdrop is { Length: > 0 } path && File.Exists(path) ? path : null;
         _backdrop = _backdropPath is null ? null : LoadImage(_backdropPath);
+
+        // GIF или видео на фоне: кадры идут из клипа, статичная картинка не нужна.
+        if (_backdropPath is null || !MediaClipFactory.IsSupported(_backdropPath)) return;
+
+        try
+        {
+            var clip = MediaClipFactory.Open(_backdropPath, ThemeRenderer.Width, ThemeRenderer.Height);
+
+            if (clip.IsStatic) clip.Dispose();
+            else _backdropClip = clip;
+        }
+        catch
+        {
+            _backdropClip = null;
+        }
     }
 
     /// <summary>Подпись раздела и кнопок: «МЕДИА» или «ФОН».</summary>
@@ -1909,7 +2408,7 @@ public partial class MainWindow : Window
 
     private void SetBackdrop(string path)
     {
-        if (LoadImage(path) is null)
+        if (MediaClipFactory.IsImage(path) && LoadImage(path) is null)
         {
             SetLog("log.openFail", Path.GetFileName(path), Loc.T("backdrop.bad"));
             return;
@@ -2416,8 +2915,15 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        // Отложенное сохранение могло ещё не сработать — пишем сразу.
+        _saveDelay.Stop();
+        SaveSettings();
+
         _lifetime.Cancel();
         Loc.Changed -= OnLanguageChanged;
+
+        // Драйвер датчиков выгружаем вместе с окном.
+        _sensors.Shutdown();
 
         var device = _device;
         _device = null;
@@ -2425,6 +2931,9 @@ public partial class MainWindow : Window
 
         _clip?.Dispose();
         _clip = null;
+
+        _backdropClip?.Dispose();
+        _backdropClip = null;
 
         _tray?.Dispose();
         _tray = null;

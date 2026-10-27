@@ -26,14 +26,20 @@ public sealed class Settings
     /// <summary>Своя раскладка панели: объекты, которые двигаются по превью.</summary>
     public List<PanelWidget> Layout { get; set; } = new();
 
+    /// <summary>Раскладка объектов по видам: у «Монитора», «Минимала» и «Своего» своя.</summary>
+    public Dictionary<string, List<PanelWidget>> Layouts { get; set; } = new();
+
     /// <summary>Шрифт кадра: имя семейства; пусто — Segoe UI.</summary>
     public string? PanelFont { get; set; }
 
     /// <summary>Цвет текста кадра: пусто — тушь темы, light, grey или accent.</summary>
     public string? PanelInk { get; set; }
 
-    /// <summary>Яркость фона кадра, 20–200 %: 100 — как есть, выше — светлее.</summary>
-    public int Background { get; set; } = 100;
+    /// <summary>Яркость фона кадра, 20–100 %: по умолчанию 50 — фото вдвое темнее.</summary>
+    public int Background { get; set; } = 50;
+
+    /// <summary>Яркость показаний, 50–200 %: 100 — как есть.</summary>
+    public int WidgetBrightness { get; set; } = 100;
 
     /// <summary>Сдвиг и масштаб содержимого — свой для каждого вида.</summary>
     public Dictionary<string, ViewTransform> Transforms { get; set; } = new();
@@ -78,6 +84,11 @@ public sealed class Settings
                 {
                     settings.RecentMedia ??= new List<string>();
                     settings.Layout ??= new List<PanelWidget>();
+                    settings.Layouts ??= new Dictionary<string, List<PanelWidget>>();
+
+                    // Старый файл хранил только раскладку «Своего» вида.
+                    if (settings.Layouts.Count == 0 && settings.Layout.Count > 0)
+                        settings.Layouts["Custom"] = settings.Layout;
                     settings.Transforms ??= new Dictionary<string, ViewTransform>();
                     return settings;
                 }

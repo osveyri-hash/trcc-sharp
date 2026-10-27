@@ -25,6 +25,13 @@ public static class MediaClipFactory
         return ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".tif" or ".tiff";
     }
 
+    /// <summary>Свой фон тем «Монитор» и «Часы» — картинка или видео под содержимым кадра.</summary>
+    public const string BackdropFilter =
+        "Фон|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.mp4;*.m4v;*.wmv;*.avi;*.mov;*.mkv;*.webm" +
+        "|Картинки|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff" +
+        "|Видео|*.mp4;*.m4v;*.wmv;*.avi;*.mov;*.mkv;*.webm" +
+        "|Все файлы|*.*";
+
     public static bool IsSupported(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();

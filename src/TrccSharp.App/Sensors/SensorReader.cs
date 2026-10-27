@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Management;
+using LibreHardwareMonitor.Hardware;
 using System.Runtime.InteropServices;
 using TrccSharp.Core.Sensors;
 
@@ -11,7 +13,9 @@ public sealed record SensorSnapshot(
     double RamTotalGb,
     double? GpuTempC,
     TimeSpan Uptime,
-    DateTime Now)
+    DateTime Now,
+    double? CpuTempC = null,
+    double? GpuLoadPercent = null)
 {
     public static SensorSnapshot Empty { get; } =
         new(0, 0, 0, null, TimeSpan.Zero, DateTime.Now);
@@ -34,15 +38,156 @@ public sealed class SensorReader
     private bool _nvidiaSmiMissing;
     private AdlGpu? _adl;
 
+    // WMI и драйвер датчиков опрашиваем в отдельном потоке:
+    // запросы медленные, кадр они держать не должны.
+    private Thread? _thermalThread;
+    private volatile bool _thermalStarted;
+    private volatile int _cpuTempRaw = int.MinValue;
+    private volatile int _gpuLoadRaw = int.MinValue;
+
+    // Датчики ЦП через LibreHardwareMonitor (нужен драйвер, обычно с правами админа).
+    private Computer? _computer;
+
     public SensorSnapshot Read()
     {
+        StartThermalPolling();
+
         return new SensorSnapshot(
             ReadCpuLoad(),
             ReadRamUsedGb(),
             ReadRamTotalGb(),
             ReadGpuTemp(),
             TimeSpan.FromMilliseconds(Environment.TickCount64),
-            DateTime.Now);
+            DateTime.Now,
+            _cpuTempRaw == int.MinValue ? null : _cpuTempRaw,
+            _gpuLoadRaw == int.MinValue ? null : _gpuLoadRaw);
+    }
+
+    /// <summary>Останавливает драйвер датчиков при выходе.</summary>
+    public void Shutdown()
+    {
+        var computer = _computer;
+        _computer = null;
+
+        try
+        {
+            computer?.Close();
+        }
+        catch
+        {
+            // Драйвер мог уже выгрузиться — ничего страшного.
+        }
+    }
+
+    private void StartThermalPolling()
+    {
+        if (_thermalStarted) return;
+
+        _thermalStarted = true;
+
+        _thermalThread = new Thread(ThermalLoop)
+        {
+            IsBackground = true,
+            Name = "trcc-sensors"
+        };
+
+        _thermalThread.Start();
+    }
+
+    private void ThermalLoop()
+    {
+        // Драйвер датчиков: без прав администратора просто не даст температуру.
+        try
+        {
+            var computer = new Computer { IsCpuEnabled = true };
+            computer.Open();
+            _computer = computer;
+        }
+        catch
+        {
+            _computer = null;
+        }
+
+        while (true)
+        {
+            try
+            {
+                if (ReadCpuTemperature() is { } temp) _cpuTempRaw = (int)Math.Round(temp);
+                if (ReadGpuLoad() is { } load) _gpuLoadRaw = (int)Math.Round(load);
+            }
+            catch
+            {
+                // Нет WMI или счётчиков — просто не показываем значение.
+            }
+
+            Thread.Sleep(2500);
+        }
+    }
+
+    /// <summary>Температура ЦП через драйвер датчиков (LibreHardwareMonitor).</summary>
+    private double? ReadCpuTemperature()
+    {
+        var computer = _computer;
+        if (computer is null) return null;
+
+        try
+        {
+            foreach (var hardware in computer.Hardware)
+            {
+                if (hardware.HardwareType != HardwareType.Cpu) continue;
+
+                hardware.Update();
+                foreach (var sub in hardware.SubHardware) sub.Update();
+
+                double? best = null;
+
+                foreach (var sensor in hardware.Sensors)
+                {
+                    if (sensor.SensorType != SensorType.Temperature || sensor.Value is not { } value) continue;
+
+                    if (sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase)
+                        || sensor.Name.Contains("Tctl", StringComparison.OrdinalIgnoreCase)
+                        || sensor.Name.Contains("Core", StringComparison.OrdinalIgnoreCase))
+                        best = Math.Max(best ?? double.MinValue, value);
+                }
+
+                if (best is > 1 and < 120) return best;
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Загрузка ГП по счётчикам Windows: сумма движков 3D.</summary>
+    private static double? ReadGpuLoad()
+    {
+        try
+        {
+            using var searcher = new ManagementObjectSearcher(
+                "SELECT Name, UtilizationPercentage FROM " +
+                "Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine");
+
+            double sum = 0;
+
+            foreach (ManagementObject engine in searcher.Get())
+            {
+                var name = engine["Name"] as string ?? "";
+
+                if (!name.Contains("engtype_3D", StringComparison.OrdinalIgnoreCase)) continue;
+
+                sum += Convert.ToDouble(engine["UtilizationPercentage"]);
+            }
+
+            return Math.Clamp(sum, 0, 100);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private double ReadCpuLoad()

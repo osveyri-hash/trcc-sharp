@@ -96,6 +96,11 @@ public partial class App : Application
 
         foreach (var theme in themes)
         {
+            // У объектных видов текст рисуется из раскладки — берём стартовую.
+            ThemeRenderer.Widgets = PanelLayouts.IsObjectView(theme)
+                ? PanelLayouts.Defaults(theme).Select(widget => widget.Clone()).ToArray()
+                : Array.Empty<PanelWidget>();
+
             // Чёрная панель — не отдельная тема, а вариант той же раскладки.
             foreach (var dark in new[] { false, true })
             {

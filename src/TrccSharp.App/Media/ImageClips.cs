@@ -1,13 +1,14 @@
 using System.Diagnostics;
 using System.IO;
+using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using TrccSharp.Core.Imaging;
 
 namespace TrccSharp.App.Media;
 
 /// <summary>
-/// Обычное фото. Кадр всегда один и тот же, поэтому 320×240 собирается
-/// один раз при открытии файла и дальше просто отдаётся.
+/// Неподвижный кадр. Файл читается один раз, поэтому 320×240 собирается
+/// тоже один раз — дальше битмап просто отдаётся.
 /// </summary>
 public sealed class StillClip : MediaClip
 {
@@ -27,7 +28,7 @@ public sealed class StillClip : MediaClip
         _bitmap = image;
     }
 
-    public override string Kind => "фото";
+    public override string Kind => "Фото";
 
     public override bool IsStatic => true;
 
@@ -35,8 +36,9 @@ public sealed class StillClip : MediaClip
 }
 
 /// <summary>
-/// Анимированный GIF. Кадр выбирается по времени, а не по счётчику кадров:
-/// поэтому при 2 кадрах/с анимация всё равно идёт с нормальной скоростью (пропуская кадры).
+/// Анимированный GIF. Кадры не просто листаются: при загрузке они собираются
+/// в один холст по правилам GIF (смещение кадра, прозрачность, способ очистки) —
+/// иначе на части файлов остаются хвосты и артефакты от предыдущих кадров.
 /// </summary>
 public sealed class GifClip : MediaClip
 {
@@ -48,30 +50,76 @@ public sealed class GifClip : MediaClip
     public GifClip(string path, int width, int height) : base(width, height)
     {
         var decoder = new GifBitmapDecoder(new Uri(path),
-            BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+            BitmapCreateOptions.None, BitmapCacheOption.OnLoad);
 
-        _frames = decoder.Frames.Select(frame => (BitmapSource)frame).ToArray();
+        var source = decoder.Frames;
+        var count = source.Count;
 
-        _endsMs = new double[_frames.Length];
+        var canvasWidth = source.Max(frame => frame.PixelWidth);
+        var canvasHeight = source.Max(frame => frame.PixelHeight);
+
+        var pixels = new byte[canvasWidth * canvasHeight * 4];
+        byte[]? saved = null;
+
+        _frames = new BitmapSource[count];
+        _endsMs = new double[count];
+
         double total = 0;
 
-        for (var i = 0; i < _frames.Length; i++)
+        byte previousDisposal = 0;
+        var lastLeft = 0;
+        var lastTop = 0;
+        var lastWidth = 0;
+        var lastHeight = 0;
+
+        for (var i = 0; i < count; i++)
         {
-            total += DelayMs(decoder.Frames[i]);
+            var frame = source[i];
+            var meta = frame.Metadata as BitmapMetadata;
+
+            var left = ReadInt(meta, "/imgdesc/Left");
+            var top = ReadInt(meta, "/imgdesc/Top");
+            var disposal = (byte)ReadInt(meta, "/grctlext/Disposal");
+
+            // Сначала убираем след предыдущего кадра так, как велит его способ очистки.
+            if (i > 0)
+            {
+                if (previousDisposal == 3 && saved is not null)
+                    Array.Copy(saved, pixels, pixels.Length);
+                else if (previousDisposal == 2)
+                    ClearRect(pixels, canvasWidth, canvasHeight, lastLeft, lastTop, lastWidth, lastHeight);
+            }
+
+            if (disposal == 3)
+                saved = (byte[])pixels.Clone();
+
+            Blend(pixels, canvasWidth, canvasHeight, left, top, frame);
+
+            lastLeft = left;
+            lastTop = top;
+            lastWidth = frame.PixelWidth;
+            lastHeight = frame.PixelHeight;
+            previousDisposal = disposal;
+
+            var composed = BitmapSource.Create(canvasWidth, canvasHeight, 96, 96,
+                PixelFormats.Bgra32, null, pixels, canvasWidth * 4);
+            composed.Freeze();
+            _frames[i] = composed;
+
+            total += DelayMs(frame);
             _endsMs[i] = total;
-            _frames[i].Freeze();
         }
 
         _totalMs = total;
     }
 
-    public override string Kind => _frames.Length > 1 ? "GIF" : "фото";
+    public override string Kind => _frames.Length > 1 ? "GIF" : "Фото";
 
     public override bool IsStatic => _frames.Length == 1;
 
     /// <summary>
-    /// Средняя частота анимации: сколько кадров GIF показывает за секунду.
-    /// При задержках 100 мс и 10 кадрах это 10 кадр/с.
+    /// Средний темп анимации: сколько кадров GIF выдаёт за секунду.
+    /// Ограничивается 100 мс и 10 мс на кадр на стороне вызывающего.
     /// </summary>
     public override double NativeFps =>
         _frames.Length > 1 && _totalMs > 0 ? _frames.Length * 1000.0 / _totalMs : 0;
@@ -89,7 +137,7 @@ public sealed class GifClip : MediaClip
         return DrawCover(_frames[index]);
     }
 
-    /// <summary>Задержка кадра GIF хранится в сотых долях секунды.</summary>
+    /// <summary>Задержка GIF хранится в сотых долях секунды.</summary>
     private static double DelayMs(BitmapFrame frame)
     {
         const double fallback = 100;   // 0,1 с — типичное значение по умолчанию
@@ -101,5 +149,93 @@ public sealed class GifClip : MediaClip
         }
 
         return fallback;
+    }
+
+    private static int ReadInt(BitmapMetadata? meta, string query)
+    {
+        try
+        {
+            if (meta is not null && meta.ContainsQuery(query)
+                && meta.GetQuery(query) is { } value)
+                return Convert.ToInt32(value);
+        }
+        catch
+        {
+            // Битая метка кадра — считаем нулём.
+        }
+
+        return 0;
+    }
+
+    private static void ClearRect(byte[] pixels, int width, int height,
+        int left, int top, int rectWidth, int rectHeight)
+    {
+        for (var y = Math.Max(0, top); y < Math.Min(height, top + rectHeight); y++)
+        {
+            var offset = (y * width + Math.Max(0, left)) * 4;
+            var end = offset + Math.Min(width - Math.Max(0, left), rectWidth) * 4;
+
+            for (var i = offset; i < end; i++)
+                pixels[i] = 0;
+        }
+    }
+
+    /// <summary>Накладывает кадр на холст с учётом прозрачности.</summary>
+    private static void Blend(byte[] canvas, int canvasWidth, int canvasHeight,
+        int left, int top, BitmapSource frame)
+    {
+        BitmapSource source = frame.Format == PixelFormats.Bgra32
+            ? frame
+            : new FormatConvertedBitmap(frame, PixelFormats.Bgra32, null, 0);
+
+        var width = source.PixelWidth;
+        var height = source.PixelHeight;
+        var pixels = new byte[width * height * 4];
+
+        source.CopyPixels(pixels, width * 4, 0);
+
+        for (var y = 0; y < height; y++)
+        {
+            var targetY = top + y;
+            if (targetY < 0 || targetY >= canvasHeight) continue;
+
+            for (var x = 0; x < width; x++)
+            {
+                var targetX = left + x;
+                if (targetX < 0 || targetX >= canvasWidth) continue;
+
+                var from = (y * width + x) * 4;
+                var to = (targetY * canvasWidth + targetX) * 4;
+
+                var alpha = pixels[from + 3];
+                if (alpha == 0) continue;
+
+                if (alpha == 255)
+                {
+                    canvas[to] = pixels[from];
+                    canvas[to + 1] = pixels[from + 1];
+                    canvas[to + 2] = pixels[from + 2];
+                    canvas[to + 3] = 255;
+                    continue;
+                }
+
+                var sa = alpha / 255.0;
+                var da = canvas[to + 3] / 255.0;
+                var outA = sa + da * (1 - sa);
+
+                canvas[to] = Mix(pixels[from], canvas[to], sa, da, outA);
+                canvas[to + 1] = Mix(pixels[from + 1], canvas[to + 1], sa, da, outA);
+                canvas[to + 2] = Mix(pixels[from + 2], canvas[to + 2], sa, da, outA);
+                canvas[to + 3] = (byte)Math.Round(outA * 255);
+            }
+        }
+    }
+
+    private static byte Mix(byte source, byte target, double sourceAlpha, double targetAlpha, double outAlpha)
+    {
+        if (outAlpha <= 0) return 0;
+
+        var value = (source * sourceAlpha + target * targetAlpha * (1 - sourceAlpha)) / outAlpha;
+        return (byte)Math.Clamp(Math.Round(value), 0, 255);
     }
 }

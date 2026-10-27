@@ -102,11 +102,6 @@ public static class ThemeRenderer
     private static readonly Pen RulePenLight = FreezePen(new Pen(RuleLight, 1));
     private static readonly Pen RulePenDark = FreezePen(new Pen(RuleDark, 1));
 
-    // Вуаль поверх фотографии: бумага (или доска) с прозрачностью — картинка видна,
-    // но тушь и тонкие линии остаются читаемыми.
-    private static readonly Brush VeilLight = Freeze(new SolidColorBrush(Color.FromArgb(0xB3, 0xF5, 0xF3, 0xEE)));
-    private static readonly Brush VeilDark = Freeze(new SolidColorBrush(Color.FromArgb(0xC2, 0x0E, 0x0E, 0x10)));
-
     // Текущая палитра кадра — переключается в начале Render.
     private static Brush Paper = PaperLight;
     private static Brush Ink = InkLight;
@@ -115,7 +110,6 @@ public static class ThemeRenderer
     private static Brush Rule = RuleLight;
     private static Brush Watermark = WatermarkLight;
     private static Brush Halftone = HalftoneLight;
-    private static Brush Veil = VeilLight;
     private static Pen RulePen = RulePenLight;
     private static bool _dark;
 
@@ -126,29 +120,25 @@ public static class ThemeRenderer
     /// <summary>Цвет текста кадра: null — тушь выбранной палитры.</summary>
     public static Color? InkColor { get; set; }
 
-    /// <summary>Яркость фона 0.2…2: ниже 1 подложка темнеет, выше — светлеет.</summary>
+    /// <summary>Яркость фона 0.2…1: единица — оригинал, ниже — подложка темнеет.</summary>
     public static double BackgroundBrightness { get; set; } = 1;
+
+    /// <summary>Яркость самих показаний: 1 — как есть, больше — светлее, меньше — тусклее.</summary>
+    public static double WidgetBrightness { get; set; } = 1;
 
     /// <summary>Сдвиг и масштаб содержимого вида; у «Своего» не применяется.</summary>
     public static ViewTransform Transform { get; set; } = new();
 
-    /// <summary>Плёнка поверх фона: темнее единицы — чёрная, светлее — белая.</summary>
+    /// <summary>Затемнение фона: 100 % — оригинал, ниже — чёрная плёнка поверх подложки.</summary>
     private static Brush? ShadeBrush
     {
         get
         {
-            var level = Math.Clamp(BackgroundBrightness, 0.2, 2);
+            var level = Math.Clamp(BackgroundBrightness, 0.2, 1);
 
-            if (level < 0.999)
-                return Freeze(new SolidColorBrush(Color.FromArgb((byte)Math.Round(255 * (1 - level)), 0, 0, 0)));
+            if (level >= 0.999) return null;
 
-            if (level > 1.001)
-            {
-                var alpha = (byte)Math.Round(255 * Math.Min(1, level - 1));
-                return Freeze(new SolidColorBrush(Color.FromArgb(alpha, 255, 255, 255)));
-            }
-
-            return null;
+            return Freeze(new SolidColorBrush(Color.FromArgb((byte)Math.Round(255 * (1 - level)), 0, 0, 0)));
         }
     }
 
@@ -160,6 +150,23 @@ public static class ThemeRenderer
         Ink = Freeze(new SolidColorBrush(color));
         Grey = Freeze(new SolidColorBrush(color) { Opacity = 0.62 });
         Faint = Freeze(new SolidColorBrush(color) { Opacity = 0.4 });
+    }
+
+    /// <summary>Яркость показаний: подтягивает тушь, подписи и тихие линии во всех видах.</summary>
+    private static void ApplyTextBrightness()
+    {
+        if (Math.Abs(WidgetBrightness - 1) < 0.001) return;
+
+        Ink = BrightenBrush(Ink);
+        Grey = BrightenBrush(Grey);
+        Faint = BrightenBrush(Faint);
+    }
+
+    private static Brush BrightenBrush(Brush brush)
+    {
+        if (brush is not SolidColorBrush solid) return brush;
+
+        return Freeze(new SolidColorBrush(Brighten(solid.Color)) { Opacity = solid.Opacity });
     }
 
     // Холст, буферы пикселей и визуал переиспользуются: за секунду их создавалось
@@ -199,6 +206,7 @@ public static class ThemeRenderer
         UsePalette(dark);
         EnsureAccent(ReadableAccent(accent ?? DefaultAccent));
         ApplyInk();
+        ApplyTextBrightness();
         var text = string.IsNullOrWhiteSpace(caption) ? null : caption.Trim();
 
         // Медиа рисует свой кадр целиком — подпись накладываем поверх.
@@ -215,21 +223,18 @@ public static class ThemeRenderer
         {
             dc.DrawRectangle(Paper, null, new Rect(0, 0, Width, Height));
 
-            // Свой фон темы: фото на весь экран, поверх — полупрозрачная бумага.
+            // Свой фон темы: фото на весь кадр один в один, без вуали.
             if (backdrop is not null)
-            {
                 DrawBackdrop(dc, backdrop);
-                dc.DrawRectangle(Veil, null, new Rect(0, 0, Width, Height));
-            }
 
-            dc.DrawRectangle(null, RulePen, new Rect(8.5, 8.5, Width - 17, Height - 17));
-
-            // Яркость фона: затемняем или подсвечиваем подложку и фото, текст не трогаем.
+            // Яркость фона: 100 % — оригинал, ниже — подложка и фото темнеют.
             if (ShadeBrush is { } shade)
                 dc.DrawRectangle(shade, null, new Rect(0, 0, Width, Height));
 
+            // Рамку кадра не рисуем: фото должно быть чистым, без линий по краям.
+
             // Сдвиг и масштаб содержимого вида: рамка остаётся на месте.
-            var transform = theme == ThemeKind.Custom ? null : Transform;
+            var transform = PanelLayouts.IsObjectView(theme) ? null : Transform;
             var moved = transform is { IsIdentity: false };
 
             dc.PushClip(new RectangleGeometry(new Rect(0, 0, Width, Height)));
@@ -347,7 +352,6 @@ public static class ThemeRenderer
         Watermark = dark ? WatermarkDark : WatermarkLight;
         Halftone = dark ? HalftoneDark : HalftoneLight;
         RulePen = dark ? RulePenDark : RulePenLight;
-        Veil = dark ? VeilDark : VeilLight;
 
         // Подпись и медиа-кадр кэшируются вместе с цветами — собираем заново.
         InvalidateCaption();
@@ -394,28 +398,8 @@ public static class ThemeRenderer
 
     private static void DrawMonitor(DrawingContext dc, SensorSnapshot sensors, string? caption)
     {
-        DrawHeader(dc, "監視", "МОНИТОР");
-        dc.DrawRectangle(Halftone, null, new Rect(266, 17, 30, 30));
-
-        var load = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
-        DrawRing(dc, 86, 108, 46, 3, load);
-
-        DrawCentered(dc, $"{sensors.CpuLoadPercent:0}", 86, 108, 34, Ink, Thin);
-        DrawTrackedCentered(dc, "ЗАГРУЗКА ЦП", 86, 166, 8.5, Grey, 1.6);
-
-        const double x = 154;
-
-        DrawTracked(dc, "ОЗУ", x, 40, 9, Grey, 1.6);
-        DrawText(dc, $"{sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", x, 54, 17, Ink, Regular);
-        DrawRule(dc, x, 84, 144);
-
-        DrawTracked(dc, "ГП", x, 94, 9, Grey, 1.6);
-        DrawText(dc, sensors.GpuTempC is { } gpu ? $"{gpu:0} °C" : "—", x, 108, 17, Ink, Regular);
-        DrawRule(dc, x, 138, 144);
-
-        DrawTracked(dc, "СИСТЕМА", x, 148, 9, Grey, 1.6);
-        DrawText(dc, FormatUptime(sensors.Uptime), x, 162, 17, Ink, Regular);
-
+        // «Монитор» — это конструктор: только объекты, без готовой раскладки.
+        DrawWidgets(dc, sensors);
         DrawCaption(dc, caption);
     }
 
@@ -439,18 +423,9 @@ public static class ThemeRenderer
     {
         DrawHeader(dc, "静", "МИНИМАЛ");
         dc.DrawRectangle(Halftone, null, new Rect(244, 60, 54, 54));
-
-        var number = Text($"{sensors.CpuLoadPercent:0}", 84, Ink, Thin);
-        dc.DrawText(number, new Point(20, 42));
-        DrawText(dc, "%", 24 + number.Width, 100, 20, Grey, Regular);
-
-        DrawTracked(dc, "ЗАГРУЗКА ЦП", 24, 140, 8.5, Grey, 1.6);
         DrawRule(dc, 22, 172, 276);
 
-        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} ГБ", 22, 182, 12, Ink, Regular);
-        DrawText(dc, sensors.GpuTempC is { } gpu ? $"ГП {gpu:0}°" : "ГП —", 150, 182, 12, Ink, Regular);
-        DrawText(dc, FormatUptime(sensors.Uptime), 250, 182, 12, Grey, Regular);
-
+        DrawWidgets(dc, sensors);
         DrawCaption(dc, caption);
     }
 
@@ -858,34 +833,226 @@ public static class ThemeRenderer
             return;
         }
 
-        foreach (var widget in widgets)
-            DrawWidget(dc, sensors, widget);
+        DrawWidgets(dc, sensors);
 
         DrawCaption(dc, caption);
     }
 
-    /// <summary>Один объект раскладки: тихая подпись сверху, значение под ней.</summary>
+    /// <summary>Один объект раскладки: кольцо-индикатор или подпись со значением.</summary>
     private static void DrawWidget(DrawingContext dc, SensorSnapshot sensors, PanelWidget widget)
     {
+        var scale = Math.Clamp(widget.Scale, 0.5, 3);
+
+        // Кольцо загрузки — такой же объект: его тоже можно таскать и растягивать.
+        if (widget.Type == "ring")
+        {
+            var radius = 46 * scale;
+
+            DrawRing(dc, widget.X + radius, widget.Y + radius, radius, 3 * scale,
+                Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1),
+                string.IsNullOrWhiteSpace(widget.Ink) ? null : WidgetBrush(widget, 1.0));
+            return;
+        }
+
+        // Свой текст: пустая строка — значит на панели ничего не рисуем.
+        if (widget.Type == "text")
+        {
+            var text = widget.Text ?? "";
+            if (text.Trim().Length == 0) return;
+
+            DrawText(dc, text, widget.X, widget.Y, 21 * scale, WidgetBrush(widget, 1.0),
+                WidgetTypeface(widget.Font, FontWeights.Light));
+            return;
+        }
+
+        var (label, value) = WidgetContent(sensors, widget);
+
+        // У объекта может быть свой цвет и свой шрифт — иначе берём кадровые.
+        var ink = WidgetBrush(widget, 1.0);
+        var soft = WidgetBrush(widget, 0.62);
+        var regular = WidgetTypeface(widget.Font, FontWeights.Normal);
+        var thin = WidgetTypeface(widget.Font, FontWeights.Light);
+
+        var valueWidth = MeasureText(value, 21 * scale, thin);
+        var labelWidth = MeasureTracked(label, 8.5 * scale, regular, 1.6);
+
+        // Подпись стоит по центру над значением.
+        var labelX = widget.X + Math.Max(0, (valueWidth - labelWidth) / 2);
+
+        if (label.Length > 0)
+            DrawTracked(dc, label, labelX, widget.Y, 8.5 * scale, soft, regular, 1.6);
+
+        DrawText(dc, value, widget.X, widget.Y + 12 * scale, 21 * scale, ink, thin);
+    }
+
+    /// <summary>Подпись и значение объекта: своя подпись важнее стандартной.</summary>
+    private static (string Label, string Value) WidgetContent(SensorSnapshot sensors, PanelWidget widget)
+    {
+        if (widget.Type == "text")
+            return ("", widget.Text ?? "");
+
         var (label, value) = WidgetText(sensors, widget.Type);
 
-        DrawTracked(dc, label, widget.X, widget.Y, 8.5, Grey, 1.6);
-        DrawText(dc, value, widget.X, widget.Y + 12, 21, Ink, Thin);
+        // null — стандартная подпись, пустая строка — подписи нет вовсе.
+        return (widget.Label ?? label, value);
     }
+
+    /// <summary>Кисть объекта: своя краска или цвет кадра с заданной прозрачностью.</summary>
+    private static Brush WidgetBrush(PanelWidget widget, double opacity)
+    {
+        if (string.IsNullOrWhiteSpace(widget.Ink))
+        {
+            // Фон затемнён — пишем светлым: иначе показания «тонут» вместе с подложкой.
+            if (BackgroundBrightness < 0.85)
+                return Freeze(new SolidColorBrush(Brighten(Color.FromRgb(0xED, 0xEA, 0xE3))) { Opacity = opacity });
+
+            // Тушь и подписи уже прошли общую яркость текста.
+            return opacity >= 0.99 ? Ink : Grey;
+        }
+
+        return Freeze(new SolidColorBrush(Brighten(ParseHex(widget.Ink))) { Opacity = opacity });
+    }
+
+    /// <summary>
+    /// Подтягивает яркость краски. На тёмной панели «ярче» — к белому,
+    /// на светлой — наоборот, к чёрному: текст становится контрастнее.
+    /// </summary>
+    private static Color Brighten(Color color)
+    {
+        var value = Math.Clamp(WidgetBrightness, 0.3, 2);
+        var factor = _dark ? value : Math.Clamp(2 - value, 0.3, 2);
+
+        if (Math.Abs(factor - 1) < 0.001) return color;
+
+        static byte Apply(byte channel, double k) => (byte)Math.Clamp(Math.Round(channel * k), 0, 255);
+
+        return Color.FromRgb(Apply(color.R, factor), Apply(color.G, factor), Apply(color.B, factor));
+    }
+
+    private static Color ParseHex(string? hex)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(hex))
+                return (Color)ColorConverter.ConvertFromString(hex);
+        }
+        catch
+        {
+            // Битая строка — рисуем тушью кадра.
+        }
+
+        return _dark ? Color.FromRgb(0xED, 0xEA, 0xE3) : Color.FromRgb(0x10, 0x10, 0x12);
+    }
+
+    // Шрифты объектов кэшируются: одинаковые имена не пересобираются на кадр.
+    private static readonly Dictionary<string, Typeface> TypefaceCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static Typeface WidgetTypeface(string? family, FontWeight weight)
+    {
+        if (string.IsNullOrWhiteSpace(family))
+            return weight == FontWeights.Light ? Thin : Regular;
+
+        var key = family + "|" + weight;
+
+        if (TypefaceCache.TryGetValue(key, out var cached)) return cached;
+
+        var typeface = new Typeface(new FontFamily(family), FontStyles.Normal, weight, FontStretches.Normal);
+        TypefaceCache[key] = typeface;
+        return typeface;
+    }
+
+    /// <summary>Стандартная подпись объекта — показываем её в поле, если своя не задана.</summary>
+    public static string LabelFor(SensorSnapshot sensors, string type) => WidgetText(sensors, type).Label;
 
     /// <summary>Что писать в объекте выбранного типа.</summary>
     private static (string Label, string Value) WidgetText(SensorSnapshot sensors, string type) => type switch
     {
         "ram" => ("ОЗУ", $"{sensors.RamUsedGb:0.0} ГБ"),
+        "ramfull" => ("ОЗУ", $"{sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ"),
         "gpu" => ("ГП", sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—"),
+        "cputemp" => ("ЦП", sensors.CpuTempC is { } cpu ? $"{cpu:0} °C" : "—"),
+        "gpuload" => ("ГП", sensors.GpuLoadPercent is { } load ? $"{load:0} %" : "—"),
         "uptime" => ("СИСТЕМА", FormatUptime(sensors.Uptime)),
         "clock" => ("ВРЕМЯ", DateTime.Now.ToString("HH:mm", Culture)),
         _ => ("ЦП", $"{sensors.CpuLoadPercent:0} %")
     };
 
+    /// <summary>Рисует все объекты текущего вида.</summary>
+    private static void DrawWidgets(DrawingContext dc, SensorSnapshot sensors)
+    {
+        foreach (var widget in Widgets)
+            DrawWidget(dc, sensors, widget);
+    }
+
     /// <summary>Габариты объекта на кадре — по ним же идёт перетаскивание мышью.</summary>
-    public static Rect WidgetBounds(PanelWidget widget) =>
-        new(widget.X, widget.Y, WidgetWidth, WidgetHeight);
+    public static Rect WidgetBounds(PanelWidget widget, SensorSnapshot? sensors = null)
+    {
+        var scale = Math.Clamp(widget.Scale, 0.5, 3);
+
+        if (widget.Type == "ring")
+        {
+            var size = 46 * scale * 2;
+            return new Rect(widget.X, widget.Y, size, size);
+        }
+
+        if (sensors is not { } data)
+            return new Rect(widget.X, widget.Y, WidgetWidth * scale, WidgetHeight * scale);
+
+        var thin = WidgetTypeface(widget.Font, FontWeights.Light);
+        var regular = WidgetTypeface(widget.Font, FontWeights.Normal);
+
+        // Свой текст рисуется одной строкой без подписи.
+        if (widget.Type == "text")
+        {
+            var text = widget.Text ?? "";
+            var textWidth = text.Trim().Length == 0
+                ? 24
+                : Math.Max(24, MeasureText(text, 21 * scale, thin));
+
+            return new Rect(widget.X, widget.Y, textWidth + 4, 21 * scale + 4);
+        }
+
+        var (label, value) = WidgetContent(data, widget);
+
+        var width = Math.Max(24, MeasureText(value, 21 * scale, thin));
+        var top = widget.Y + 12 * scale;
+        var height = 21 * scale + 4;
+
+        // Подпись есть — рамка захватывает и её строку.
+        if (label.Length > 0)
+        {
+            width = Math.Max(width, MeasureTracked(label, 8.5 * scale, regular, 1.6));
+            top = widget.Y;
+            height += 12 * scale;
+        }
+
+        return new Rect(widget.X, top, width + 4, height);
+    }
+
+    /// <summary>Сколько пустой строки сверху, если подписи нет: значение ниже якоря.</summary>
+    public static double LabelOffset(PanelWidget widget)
+    {
+        if (widget.Type is "text" or "ring") return 0;
+        if (widget.Label is not "") return 0;
+
+        return 12 * Math.Clamp(widget.Scale, 0.5, 3);
+    }
+
+    private static double MeasureText(string text, double size, Typeface typeface) =>
+        text.Length == 0 ? 0 : Text(text, size, Ink, typeface).WidthIncludingTrailingWhitespace;
+
+    /// <summary>Ширина текста с разрядкой — как в DrawTracked.</summary>
+    private static double MeasureTracked(string text, double size, Typeface typeface, double tracking)
+    {
+        if (text.Length == 0) return 0;
+
+        double width = 0;
+
+        foreach (var ch in text)
+            width += Text(ch.ToString(), size, Ink, typeface).WidthIncludingTrailingWhitespace + tracking;
+
+        return Math.Max(0, width - tracking);
+    }
 
     /// <summary>Заливка под кривой истории — замкнутый контур до нижней границы.</summary>
     private static void DrawSparkArea(DrawingContext dc, double[] values,
@@ -956,14 +1123,15 @@ public static class ThemeRenderer
         dc.DrawRectangle(Rule, null, new Rect(x, y, width, 1));
 
     /// <summary>Кольцо-индикатор: серая окружность и дуга загрузки от 12 часов.</summary>
-    private static void DrawRing(DrawingContext dc, double cx, double cy, double radius, double thickness, double fraction)
+    private static void DrawRing(DrawingContext dc, double cx, double cy, double radius, double thickness, double fraction,
+        Brush? brush = null)
     {
         dc.DrawEllipse(null, RulePen, new Point(cx, cy), radius, radius);
 
         var ratio = Math.Clamp(fraction, 0, 1);
         if (ratio <= 0.002) return;
 
-        var pen = new Pen(_accentBrush, thickness)
+        var pen = new Pen(brush ?? _accentBrush, thickness)
         {
             StartLineCap = PenLineCap.Round,
             EndLineCap = PenLineCap.Round
@@ -1011,13 +1179,17 @@ public static class ThemeRenderer
 
     /// <summary>Текст с разрядкой — так подписи выглядят «типографски».</summary>
     private static double DrawTracked(DrawingContext dc, string text, double x, double y, double size,
-        Brush brush, double tracking)
+        Brush brush, double tracking) =>
+        DrawTracked(dc, text, x, y, size, brush, Regular, tracking);
+
+    private static double DrawTracked(DrawingContext dc, string text, double x, double y, double size,
+        Brush brush, Typeface typeface, double tracking)
     {
         var cursor = x;
 
         foreach (var ch in text)
         {
-            var formatted = Text(ch.ToString(), size, brush, Regular);
+            var formatted = Text(ch.ToString(), size, brush, typeface);
             dc.DrawText(formatted, new Point(cursor, y));
             cursor += formatted.WidthIncludingTrailingWhitespace + tracking;
         }

@@ -15,6 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Температура ЦП и загрузка ГП читаются через WMI. -->
+    <PackageReference Include="System.Management" Version="9.0.0" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.4" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Фон окна: картинка пользователя, из неё Backdrop.cs делает маску по яркости. -->
     <Resource Include="assets\backdrop.jpg" />
     <Resource Include="assets\TrccSharp.ico" />
