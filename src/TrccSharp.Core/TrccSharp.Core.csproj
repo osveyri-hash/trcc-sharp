@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <RootNamespace>TrccSharp.Core</RootNamespace>
+    <AssemblyName>TrccSharp.Core</AssemblyName>
+    <Description>Транспорт WinUSB и протокол LCD-экранов Thermalright (TRCC).</Description>
+  </PropertyGroup>
+
+</Project>
