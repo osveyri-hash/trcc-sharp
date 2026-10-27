@@ -43,13 +43,26 @@ public sealed class ThemePreset : INotifyPropertyChanged
     public event PropertyChangedEventHandler? PropertyChanged;
 
     [JsonIgnore]
-    public string KindLabel => ToKind() switch
+    public string KindLabel => ViewName(ToKind());
+
+    /// <summary>Подпись вида или темы — одна и та же в списке тем и в имени пресета.</summary>
+    public static string ViewName(ThemeKind kind) => kind switch
     {
         ThemeKind.Clock => Loc.T("tile.clock"),
         ThemeKind.Media => Loc.T("tile.media"),
-        ThemeKind.History => Loc.T("tile.history"),
-        ThemeKind.Rings => Loc.T("tile.rings"),
-        ThemeKind.Minimal => Loc.T("tile.minimal"),
+        ThemeKind.Minimal => Loc.T("view.minimal"),
+        ThemeKind.History => Loc.T("view.history"),
+        ThemeKind.Rings => Loc.T("view.rings"),
+        ThemeKind.Bars => Loc.T("view.bars"),
+        ThemeKind.Columns => Loc.T("view.columns"),
+        ThemeKind.Dial => Loc.T("view.dial"),
+        ThemeKind.Typographic => Loc.T("view.typo"),
+        ThemeKind.Cells => Loc.T("view.cells"),
+        ThemeKind.List => Loc.T("view.list"),
+        ThemeKind.Wave => Loc.T("view.wave"),
+        ThemeKind.Split => Loc.T("view.split"),
+        ThemeKind.Ticks => Loc.T("view.ticks"),
+        ThemeKind.Radar => Loc.T("view.radar"),
         ThemeKind.Test => Loc.T("tile.test"),
         _ => Loc.T("tile.monitor")
     };

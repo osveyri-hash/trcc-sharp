@@ -55,8 +55,9 @@ public partial class MainWindow : Window
     // Чёрный вариант панели — тот же рисунок, но тушь светлая.
     private bool _panelDark;
 
-    // Вид темы «Монитор»: обычный или минимал (раньше был отдельной плиткой).
-    private bool _minimal;
+    // Вид темы «Монитор»: обычный, минимал, график, кольца и ещё десять —
+    // все они живут внутри одной плитки «Монитор» строкой «ВИД».
+    private ThemeKind _monitorView = ThemeKind.Monitor;
 
     // Левая панель свёрнута до одних контролов (кнопка «три полоски»).
     private bool _compact;
@@ -150,9 +151,7 @@ public partial class MainWindow : Window
         {
             (TileMonitor, ThemeKind.Monitor),
             (TileClock, ThemeKind.Clock),
-            (TileMedia, ThemeKind.Media),
-            (TileHistory, ThemeKind.History),
-            (TileRings, ThemeKind.Rings)
+            (TileMedia, ThemeKind.Media)
         };
 
         _themes.EnsureStarterThemes();
@@ -173,6 +172,10 @@ public partial class MainWindow : Window
         }
 
         SelectTheme(ParseTheme(_settings.Theme), apply: false);
+
+        // Вид «Монитора»: новые настройки лежат отдельно, старые — прямо в теме.
+        if (Enum.TryParse<ThemeKind>(_settings.MonitorView, true, out var savedView) && IsViewKind(savedView))
+            SelectView(savedView, apply: false);
 
         if (_settings.Fps is >= 1 and <= 10)
             FpsSlider.Value = _settings.Fps;
@@ -377,14 +380,42 @@ public partial class MainWindow : Window
         if (IsLoaded) RenderFrame();
     }
 
-    // ── Вид «Монитора»: обычный или минимал ─────────────────────────────────
+    // ── Вид «Монитора»: четырнадцать вариантов одной темы ──────────────────
+
+    /// <summary>Кнопки вида в том же порядке, что и в разметке.</summary>
+    private (ToggleButton Button, ThemeKind Kind)[] ViewTiles() => new[]
+    {
+        (ViewFull, ThemeKind.Monitor),
+        (ViewMinimal, ThemeKind.Minimal),
+        (ViewHistory, ThemeKind.History),
+        (ViewRings, ThemeKind.Rings),
+        (ViewBars, ThemeKind.Bars),
+        (ViewColumns, ThemeKind.Columns),
+        (ViewDial, ThemeKind.Dial),
+        (ViewType, ThemeKind.Typographic),
+        (ViewCells, ThemeKind.Cells),
+        (ViewList, ThemeKind.List),
+        (ViewWave, ThemeKind.Wave),
+        (ViewSplit, ThemeKind.Split),
+        (ViewTicks, ThemeKind.Ticks),
+        (ViewRadar, ThemeKind.Radar)
+    };
+
+    /// <summary>Виды — это варианты «Монитора», а не самостоятельные темы.</summary>
+    private static bool IsViewKind(ThemeKind kind) => kind is
+        ThemeKind.Minimal or ThemeKind.History or ThemeKind.Rings or
+        ThemeKind.Bars or ThemeKind.Columns or ThemeKind.Dial or ThemeKind.Typographic or
+        ThemeKind.Cells or ThemeKind.List or ThemeKind.Wave or ThemeKind.Split or
+        ThemeKind.Ticks or ThemeKind.Radar;
 
     private void UpdateViewButtons()
     {
         if (ViewFull is null) return;
 
-        ViewFull.IsChecked = !_minimal;
-        ViewMinimal.IsChecked = _minimal;
+        foreach (var (button, kind) in ViewTiles())
+        {
+            if (button is not null) button.IsChecked = kind == _monitorView;
+        }
 
         // Вид есть только у «Монитора» — у остальных тем строка неактивна.
         var isMonitor = _theme == ThemeKind.Monitor;
@@ -395,13 +426,21 @@ public partial class MainWindow : Window
     private void OnViewClick(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleButton option) return;
+        if (option.Tag is not string tag || !Enum.TryParse<ThemeKind>(tag, true, out var kind)) return;
 
-        _minimal = (option.Tag as string) == "minimal";
+        SelectView(kind, apply: true);
+    }
+
+    private void SelectView(ThemeKind view, bool apply)
+    {
+        _monitorView = IsViewKind(view) ? view : ThemeKind.Monitor;
+
         UpdateViewButtons();
-
         _frameDirty = true;
-        SaveSettings();
 
+        if (!apply) return;
+
+        SaveSettings();
         if (IsLoaded) RenderFrame();
     }
 
@@ -681,9 +720,9 @@ public partial class MainWindow : Window
 
     private ThemeKind CurrentTheme => _theme;
 
-    /// <summary>Что рисовать: «Минимал» — это вид темы «Монитор», а не своя тема.</summary>
+    /// <summary>Что рисовать: виды — это варианты «Монитора», а не свои темы.</summary>
     private ThemeKind RenderKind() =>
-        _theme == ThemeKind.Monitor && _minimal ? ThemeKind.Minimal : _theme;
+        _theme == ThemeKind.Monitor ? _monitorView : _theme;
 
     private static bool IsOldDarkTheme(string? value) =>
         value is "MonitorDark" or "Чёрный" or "Черный";
@@ -702,10 +741,10 @@ public partial class MainWindow : Window
 
     private void SelectTheme(ThemeKind kind, bool apply)
     {
-        // «Минимал» — не отдельная тема, а вид темы «Монитор».
-        if (kind == ThemeKind.Minimal)
+        // Любой вид — не отдельная тема, а вариант «Монитора».
+        if (IsViewKind(kind))
         {
-            _minimal = true;
+            _monitorView = kind;
             kind = ThemeKind.Monitor;
         }
 
@@ -956,7 +995,8 @@ public partial class MainWindow : Window
 
         _settings.Fps = (int)Math.Round(FpsSlider.Value);
         _settings.Brightness = BrightnessSlider is null ? _brightness : (int)Math.Round(BrightnessSlider.Value);
-        _settings.Theme = RenderKind().ToString();
+        _settings.Theme = _theme.ToString();
+        _settings.MonitorView = _monitorView.ToString();
         _settings.Accent = ThemePreset.ToHex(_accent);
         _settings.UiTheme = _skin;
         _settings.PanelDark = _panelDark;
@@ -1064,7 +1104,7 @@ public partial class MainWindow : Window
             _panelDark = preset.Dark;
             UpdatePanelButtons();
 
-            _minimal = preset.ToKind() == ThemeKind.Minimal;
+            _monitorView = IsViewKind(preset.ToKind()) ? preset.ToKind() : ThemeKind.Monitor;
 
             SelectTheme(preset.ToKind(), apply: false);
         }
@@ -1096,14 +1136,7 @@ public partial class MainWindow : Window
         SetLog("log.presetDeleted", preset.Name);
     }
 
-    private static string KindName(ThemeKind kind) => kind switch
-    {
-        ThemeKind.Clock => Loc.T("tile.clock"),
-        ThemeKind.Media => Loc.T("tile.media"),
-        ThemeKind.Minimal => Loc.T("tile.minimal"),
-        ThemeKind.Test => Loc.T("tile.test"),
-        _ => Loc.T("tile.monitor")
-    };
+    private static string KindName(ThemeKind kind) => ThemePreset.ViewName(kind);
 
     // ── Петля кадров ────────────────────────────────────────────────────────
 

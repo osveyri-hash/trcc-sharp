@@ -173,10 +173,12 @@ public sealed class LiquidSegments : Grid
         _pill.Height = height;
 
         var fromX = Canvas.GetLeft(_pill);
-        if (!animate || double.IsNaN(fromX) || _pill.Width <= 0)
+        var fromY = Canvas.GetTop(_pill);
+        if (!animate || double.IsNaN(fromX) || double.IsNaN(fromY) || _pill.Width <= 0)
         {
             _animating = false;
             _pill.BeginAnimation(Canvas.LeftProperty, null);
+            _pill.BeginAnimation(Canvas.TopProperty, null);
             _pill.BeginAnimation(FrameworkElement.WidthProperty, null);
 
             Canvas.SetLeft(_pill, point.X);
@@ -197,6 +199,10 @@ public sealed class LiquidSegments : Grid
 
         _animating = true;
         _pill.BeginAnimation(Canvas.LeftProperty, move);
+
+        // Стекло ездит и по вертикали: строк вида теперь четыре.
+        var rise = new DoubleAnimation(fromY, point.Y, duration) { EasingFunction = easing };
+        _pill.BeginAnimation(Canvas.TopProperty, rise);
 
         var widthAnimation = new DoubleAnimationUsingKeyFrames { Duration = duration };
         widthAnimation.KeyFrames.Add(new LinearDoubleKeyFrame(_pill.Width, KeyTime.FromPercent(0)));

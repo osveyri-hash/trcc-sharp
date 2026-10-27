@@ -8,6 +8,10 @@ public sealed class Settings
 {
     public string? MediaPath { get; set; }
     public string? Theme { get; set; }
+
+    /// <summary>Вид темы «Монитор»: Обычный, Минимал, График, Кольца и остальные.</summary>
+    public string? MonitorView { get; set; }
+
     public int Fps { get; set; } = 2;
 
     /// <summary>Яркость панели, 10–100 %.</summary>

@@ -16,6 +16,16 @@ public enum ThemeKind
     Minimal,
     History,
     Rings,
+    Bars,
+    Columns,
+    Dial,
+    Typographic,
+    Cells,
+    List,
+    Wave,
+    Split,
+    Ticks,
+    Radar,
     Test
 }
 
@@ -163,6 +173,36 @@ public static class ThemeRenderer
                     break;
                 case ThemeKind.Rings:
                     DrawRings(dc, sensors, text);
+                    break;
+                case ThemeKind.Bars:
+                    DrawBars(dc, sensors, text);
+                    break;
+                case ThemeKind.Columns:
+                    DrawColumns(dc, sensors, text);
+                    break;
+                case ThemeKind.Dial:
+                    DrawDial(dc, sensors, text);
+                    break;
+                case ThemeKind.Typographic:
+                    DrawTypographic(dc, sensors, text);
+                    break;
+                case ThemeKind.Cells:
+                    DrawCells(dc, sensors, text);
+                    break;
+                case ThemeKind.List:
+                    DrawList(dc, sensors, text);
+                    break;
+                case ThemeKind.Wave:
+                    DrawWave(dc, sensors, text);
+                    break;
+                case ThemeKind.Split:
+                    DrawSplit(dc, sensors, text);
+                    break;
+                case ThemeKind.Ticks:
+                    DrawTicks(dc, sensors, text);
+                    break;
+                case ThemeKind.Radar:
+                    DrawRadar(dc, sensors, text);
                     break;
                 case ThemeKind.Media:
                     DrawMediaHint(dc, text);
@@ -482,6 +522,394 @@ public static class ThemeRenderer
         var lastValue = Math.Clamp(values[lastIndex], 0, 100);
         var lastPoint = new Point(x + width, y + height - height * lastValue / 100);
         dc.DrawEllipse(pen.Brush, null, lastPoint, 2.2, 2.2);
+    }
+
+    // ── Виды «Монитора» ─────────────────────────────────────────────────────
+
+    /// <summary>Кисть акцента с заданной прозрачностью — для заливок и плашек.</summary>
+    private static Brush AccentFill(double opacity)
+    {
+        var brush = new SolidColorBrush(_accentColor) { Opacity = Math.Clamp(opacity, 0, 1) };
+        brush.Freeze();
+        return brush;
+    }
+
+    /// <summary>Дуга окружности: старт в градусах, размах со знаком.</summary>
+    private static void DrawArc(DrawingContext dc, double cx, double cy, double radius, Pen pen,
+        double startDegrees, double sweepDegrees)
+    {
+        if (Math.Abs(sweepDegrees) < 0.1) return;
+
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            ctx.BeginFigure(PointOnCircle(cx, cy, radius, startDegrees), false, false);
+            ctx.ArcTo(PointOnCircle(cx, cy, radius, startDegrees + sweepDegrees), new Size(radius, radius),
+                0, Math.Abs(sweepDegrees) > 180,
+                sweepDegrees > 0 ? SweepDirection.Clockwise : SweepDirection.Counterclockwise, true, false);
+        }
+
+        geometry.Freeze();
+        dc.DrawGeometry(null, pen, geometry);
+    }
+
+    /// <summary>Текст, прижатый правым краем к заданной координате.</summary>
+    private static void DrawRight(DrawingContext dc, string text, double right, double y, double size,
+        Brush brush, Typeface typeface)
+    {
+        var formatted = Text(text, size, brush, typeface);
+        dc.DrawText(formatted, new Point(right - formatted.Width, y));
+    }
+
+    /// <summary>Полосы: три горизонтальных шкалы с подписями и значениями.</summary>
+    private static void DrawBars(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "棒", "ПОЛОСЫ");
+
+        var gpu = sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0;
+        var rows = new (string Title, double Fraction, string Value, Brush Brush)[]
+        {
+            ("ЦП", Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1), $"{sensors.CpuLoadPercent:0} %", _accentBrush),
+            ("ОЗУ", Math.Clamp(sensors.RamLoadPercent / 100, 0, 1), $"{sensors.RamUsedGb:0.0} ГБ", Ink),
+            ("ГП", gpu, sensors.GpuTempC is { } c ? $"{c:0} °C" : "—", Grey)
+        };
+
+        var y = 52.0;
+        foreach (var row in rows)
+        {
+            DrawTracked(dc, row.Title, 22, y, 9, Grey, 1.6);
+            DrawRight(dc, row.Value, 298, y - 6, 15, Ink, Regular);
+
+            var top = y + 18;
+            dc.DrawRectangle(Rule, null, new Rect(22, top, 276, 5));
+
+            var width = 276 * Math.Clamp(row.Fraction, 0, 1);
+            if (width > 0.5) dc.DrawRectangle(row.Brush, null, new Rect(22, top, width, 5));
+
+            y += 46;
+        }
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Столбцы: три вертикальные колонки от общей базовой линии.</summary>
+    private static void DrawColumns(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "柱", "СТОЛБЦЫ");
+
+        const double baseline = 170, top = 58;
+
+        var columns = new (double X, double Fraction, string Value, string Title)[]
+        {
+            (62, Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1), $"{sensors.CpuLoadPercent:0}%", "ЦП"),
+            (160, Math.Clamp(sensors.RamLoadPercent / 100, 0, 1), $"{sensors.RamLoadPercent:0}%", "ОЗУ"),
+            (258, sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0,
+                sensors.GpuTempC is { } c ? $"{c:0}°" : "—", "ГП")
+        };
+
+        DrawRule(dc, 22, baseline, 276);
+
+        foreach (var column in columns)
+        {
+            var height = (baseline - top) * Math.Clamp(column.Fraction, 0, 1);
+
+            if (height > 1)
+                dc.DrawRectangle(AccentFill(0.8), null, new Rect(column.X - 21, baseline - height, 42, height));
+            else
+                dc.DrawRectangle(Rule, null, new Rect(column.X - 21, baseline - 2, 42, 2));
+
+            DrawCentered(dc, column.Value, column.X, baseline - height - 16, 15, Ink, Regular);
+            DrawTrackedCentered(dc, column.Title, column.X, baseline + 12, 8.5, Grey, 1.6);
+        }
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Шкала: большая дуга-спидометр на 240° и две метрики справа.</summary>
+    private static void DrawDial(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "計", "ШКАЛА");
+
+        const double cx = 104, cy = 128, radius = 74;
+        var fraction = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
+
+        var track = new Pen(Rule, 6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        track.Freeze();
+        DrawArc(dc, cx, cy, radius, track, 150, 240);
+
+        var pen = new Pen(_accentBrush, 6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
+        pen.Freeze();
+        DrawArc(dc, cx, cy, radius, pen, 150, 240 * fraction);
+
+        // Деления по 10 %.
+        for (var i = 0; i <= 10; i++)
+        {
+            var angle = 150 + 24.0 * i;
+            var inner = PointOnCircle(cx, cy, radius - (i % 5 == 0 ? 19 : 12), angle);
+            var outer = PointOnCircle(cx, cy, radius - 7, angle);
+            dc.DrawLine(RulePen, inner, outer);
+        }
+
+        DrawCentered(dc, $"{sensors.CpuLoadPercent:0}", cx, cy - 20, 40, Ink, Thin);
+        DrawTrackedCentered(dc, "ЦП", cx, cy + 12, 8.5, Grey, 1.6);
+
+        DrawTracked(dc, "ОЗУ", 214, 88, 9, Grey, 1.6);
+        DrawText(dc, $"{sensors.RamUsedGb:0.0} ГБ", 214, 102, 16, Ink, Regular);
+        DrawRule(dc, 214, 134, 84);
+
+        DrawTracked(dc, "ГП", 214, 144, 9, Grey, 1.6);
+        DrawText(dc, sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—", 214, 158, 16, Ink, Regular);
+        DrawRule(dc, 214, 190, 84);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Типограф: гигантская цифра и тихая строка метрик под линейкой.</summary>
+    private static void DrawTypographic(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "字", "ТИПОГРАФ");
+
+        var big = Text($"{sensors.CpuLoadPercent:0}", 84, Ink, Thin);
+        dc.DrawText(big, new Point(16, 40));
+        DrawText(dc, "%", 24 + big.Width, 88, 22, Grey, Regular);
+        DrawTracked(dc, "ЗАГРУЗКА ЦП", 22, 146, 9, Grey, 2.0);
+
+        DrawRule(dc, 22, 176, 276);
+
+        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 22, 184, 11, Ink, Regular);
+        DrawText(dc, sensors.GpuTempC is { } temp ? $"ГП {temp:0} °C" : "ГП —", 176, 184, 11, Ink, Regular);
+        DrawRight(dc, FormatUptime(sensors.Uptime), 298, 184, 11, Grey, Regular);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Сетка: четыре ячейки, разделённые волосяными линиями.</summary>
+    private static void DrawCells(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "格", "СЕТКА");
+
+        dc.DrawRectangle(Rule, null, new Rect(20, 116, 280, 1));
+        dc.DrawRectangle(Rule, null, new Rect(160, 36, 1, 162));
+
+        var cells = new (double X, double Y, string Title, string Value)[]
+        {
+            (22, 46, "ЦП", $"{sensors.CpuLoadPercent:0} %"),
+            (172, 46, "ОЗУ", $"{sensors.RamLoadPercent:0} %"),
+            (22, 130, "ГП", sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—"),
+            (172, 130, "СИСТЕМА", FormatUptime(sensors.Uptime))
+        };
+
+        foreach (var cell in cells)
+        {
+            DrawTracked(dc, cell.Title, cell.X, cell.Y, 8.5, Grey, 1.8);
+            DrawText(dc, cell.Value, cell.X, cell.Y + 20, 24, Ink, Regular);
+        }
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Список: подпись слева, значение справа, волосяные линии между строками.</summary>
+    private static void DrawList(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "表", "СПИСОК");
+
+        var rows = new (string Title, string Value)[]
+        {
+            ("ПРОЦЕССОР", $"{sensors.CpuLoadPercent:0} %"),
+            ("ПАМЯТЬ", $"{sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ"),
+            ("ГРАФИКА", sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—"),
+            ("СИСТЕМА", FormatUptime(sensors.Uptime))
+        };
+
+        var y = 48.0;
+        foreach (var row in rows)
+        {
+            DrawTracked(dc, row.Title, 22, y + 5, 9, Grey, 1.6);
+            DrawRight(dc, row.Value, 298, y, 17, Ink, Regular);
+            DrawRule(dc, 22, y + 30, 276);
+            y += 38;
+        }
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Волна: одна кривая загрузки ЦП с заливкой под ней.</summary>
+    private static void DrawWave(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "波", "ВОЛНА");
+
+        PushHistory(sensors);
+
+        var big = Text($"{sensors.CpuLoadPercent:0}", 46, Ink, Thin);
+        dc.DrawText(big, new Point(20, 28));
+        DrawText(dc, "%", 24 + big.Width, 58, 18, Grey, Regular);
+
+        DrawTracked(dc, "ОЗУ", 206, 36, 8.5, Grey, 1.6);
+        DrawText(dc, $"{sensors.RamUsedGb:0.0} ГБ", 206, 48, 14, Ink, Regular);
+
+        DrawTracked(dc, "ГП", 206, 74, 8.5, Grey, 1.6);
+        DrawText(dc, sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—", 206, 86, 14, Ink, Regular);
+
+        const double left = 20, right = 300, top = 108, bottom = 190;
+
+        DrawSparkArea(dc, CpuHistory, left, top, right - left, bottom - top, AccentFill(0.16));
+
+        var pen = new Pen(_accentBrush, 2)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        pen.Freeze();
+
+        DrawSpark(dc, CpuHistory, left, top, right - left, bottom - top, pen);
+        DrawRule(dc, left, bottom, right - left);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Разрез: левая половина подкрашена акцентом, справа — две метрики.</summary>
+    private static void DrawSplit(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "断", "РАЗРЕЗ");
+
+        dc.DrawRectangle(AccentFill(0.1), null, new Rect(10, 10, 145, Height - 20));
+
+        var big = Text($"{sensors.CpuLoadPercent:0}", 52, Ink, Thin);
+        dc.DrawText(big, new Point(24, 56));
+        DrawText(dc, "%", 28 + big.Width, 96, 18, Grey, Regular);
+        DrawTracked(dc, "ЗАГРУЗКА ЦП", 26, 138, 8.5, Grey, 1.6);
+
+        DrawTracked(dc, "ОЗУ", 176, 58, 9, Grey, 1.6);
+        DrawText(dc, $"{sensors.RamUsedGb:0.0}", 176, 72, 26, Ink, Regular);
+        DrawText(dc, $"из {sensors.RamTotalGb:0.0} ГБ", 176, 106, 11, Grey, Regular);
+
+        DrawRule(dc, 176, 136, 108);
+
+        DrawTracked(dc, "ГП", 176, 148, 9, Grey, 1.6);
+        DrawText(dc, sensors.GpuTempC is { } temp ? $"{temp:0} °C" : "—", 176, 162, 26, Ink, Regular);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Деления: линейная шкала с бегунком на текущем значении ЦП.</summary>
+    private static void DrawTicks(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "目", "ДЕЛЕНИЯ");
+
+        const double left = 22, right = 298, baseline = 122;
+        var fraction = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
+
+        for (var i = 0; i <= 50; i++)
+        {
+            var x = Math.Round(left + (right - left) * i / 50.0) + 0.5;
+            var length = i % 10 == 0 ? 16 : i % 5 == 0 ? 10 : 6;
+            dc.DrawLine(RulePen, new Point(x, baseline), new Point(x, baseline - length));
+        }
+
+        var marker = left + (right - left) * fraction;
+        var markerPen = new Pen(_accentBrush, 2);
+        markerPen.Freeze();
+        dc.DrawLine(markerPen, new Point(marker, baseline - 28), new Point(marker, baseline + 10));
+
+        var labelX = Math.Clamp(marker, 46, 274);
+        DrawCentered(dc, $"{sensors.CpuLoadPercent:0}", labelX, baseline - 48, 22, Ink, Thin);
+
+        DrawTracked(dc, "ЗАГРУЗКА ЦП", 22, baseline + 22, 8.5, Grey, 1.6);
+        DrawRule(dc, 22, 176, 276);
+
+        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 22, 184, 11, Ink, Regular);
+        DrawRight(dc, sensors.GpuTempC is { } temp ? $"ГП {temp:0} °C" : "ГП —", 298, 184, 11, Grey, Regular);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>
+    /// Радар: три метрики на осях через 120° — ЦП сверху, ОЗУ справа, ГП слева.
+    /// Кольца показывают шкалу 33/66/100 %, фигура — текущее положение.
+    /// </summary>
+    private static void DrawRadar(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "探", "РАДАР");
+
+        const double cx = 160, cy = 124, radius = 56;
+
+        var cpu = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
+        var ram = Math.Clamp(sensors.RamLoadPercent / 100, 0, 1);
+        var gpu = sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0;
+
+        // Паутина: три кольца и три оси.
+        for (var ring = 1; ring <= 3; ring++)
+            dc.DrawEllipse(null, RulePen, new Point(cx, cy), radius * ring / 3.0, radius * ring / 3.0);
+
+        var axes = new[] { -90.0, 30.0, 150.0 };
+
+        foreach (var angle in axes)
+            dc.DrawLine(RulePen, new Point(cx, cy), PointOnCircle(cx, cy, radius, angle));
+
+        // Фигура по трём метрикам.
+        var fractions = new[] { cpu, ram, gpu };
+        var vertices = new Point[3];
+
+        for (var i = 0; i < 3; i++)
+            vertices[i] = PointOnCircle(cx, cy, Math.Max(2, radius * fractions[i]), axes[i]);
+
+        var shape = new StreamGeometry();
+        using (var ctx = shape.Open())
+        {
+            ctx.BeginFigure(vertices[0], true, true);
+            ctx.LineTo(vertices[1], true, false);
+            ctx.LineTo(vertices[2], true, false);
+        }
+
+        shape.Freeze();
+
+        var edge = new Pen(_accentBrush, 1.8) { LineJoin = PenLineJoin.Round };
+        edge.Freeze();
+
+        dc.DrawGeometry(AccentFill(0.18), edge, shape);
+
+        foreach (var vertex in vertices)
+            dc.DrawEllipse(_accentBrush, null, vertex, 2.4, 2.4);
+
+        // Подписи у вершин: сверху, справа и слева — чтобы не лезть на фигуру.
+        DrawCentered(dc, $"ЦП {sensors.CpuLoadPercent:0} %", cx, 44, 10, Ink, Regular);
+        DrawCentered(dc, $"ОЗУ {sensors.RamLoadPercent:0} %", 248, 146, 10, Ink, Regular);
+        DrawCentered(dc, sensors.GpuTempC is { } g ? $"ГП {g:0} °C" : "ГП —", 72, 146, 10, Ink, Regular);
+
+        DrawRule(dc, 22, 190, 276);
+        DrawText(dc, $"ОЗУ {sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 22, 196, 9.5, Grey, Regular);
+        DrawRight(dc, FormatUptime(sensors.Uptime), 298, 196, 9.5, Grey, Regular);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Заливка под кривой истории — замкнутый контур до нижней границы.</summary>
+    private static void DrawSparkArea(DrawingContext dc, double[] values,
+        double x, double y, double width, double height, Brush brush)
+    {
+        if (_historyCount < 2) return;
+
+        var step = width / (HistorySamples - 1);
+        var firstX = x + width - (_historyCount - 1) * step;
+
+        var geometry = new StreamGeometry();
+        using (var ctx = geometry.Open())
+        {
+            ctx.BeginFigure(new Point(firstX, y + height), true, true);
+
+            for (var i = 0; i < _historyCount; i++)
+            {
+                var index = (_historyHead - _historyCount + i + HistorySamples * 2) % HistorySamples;
+                var value = Math.Clamp(values[index], 0, 100);
+                var px = firstX + i * step;
+                var py = y + height - height * value / 100;
+                ctx.LineTo(new Point(px, py), true, false);
+            }
+        }
+
+        geometry.Freeze();
+        dc.DrawGeometry(brush, null, geometry);
     }
 
     /// <summary>Заглушка темы «Медиа», пока файл не выбран.</summary>

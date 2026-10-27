@@ -89,7 +89,10 @@ public partial class App : Application
         var themes = new[]
         {
             ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Media,
-            ThemeKind.Minimal, ThemeKind.History, ThemeKind.Rings, ThemeKind.Test
+            ThemeKind.Minimal, ThemeKind.History, ThemeKind.Rings,
+            ThemeKind.Bars, ThemeKind.Columns, ThemeKind.Dial, ThemeKind.Typographic,
+            ThemeKind.Cells, ThemeKind.List, ThemeKind.Wave, ThemeKind.Split,
+            ThemeKind.Ticks, ThemeKind.Radar, ThemeKind.Test
         };
 
         foreach (var theme in themes)
