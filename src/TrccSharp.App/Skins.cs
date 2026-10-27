@@ -4,52 +4,89 @@ using System.Windows.Media;
 namespace TrccSharp.App;
 
 /// <summary>
-/// Две темы окна: нежная светлая (крем и роза) и мягкая тёмная (слива и пыль).
-/// Кисти живут в ресурсах приложения, разметка ссылается на них через DynamicResource,
-/// поэтому переключение происходит на лету, без перезапуска.
+/// Палитры окна. «Крем» — тёплая светлая/тёмная пара, «Океан» — холодная
+/// голубая/ночная. Кисти живут в ресурсах приложения, разметка ссылается
+/// на них через DynamicResource, поэтому переключение идёт на лету.
 /// </summary>
 public static class Skins
 {
     public const string Light = "light";
     public const string Dark = "dark";
+    public const string OceanLight = "ocean-light";
+    public const string OceanDark = "ocean-dark";
 
-    public static string Normalize(string? skin) => skin == Dark ? Dark : Light;
+    public static string Normalize(string? skin) => skin switch
+    {
+        Dark => Dark,
+        OceanLight => OceanLight,
+        OceanDark => OceanDark,
+        _ => Light
+    };
 
-    public static bool IsDark(string? skin) => Normalize(skin) == Dark;
+    public static bool IsDark(string? skin) => Normalize(skin) is Dark or OceanDark;
+
+    public static bool IsOcean(string? skin) => Normalize(skin) is OceanLight or OceanDark;
+
+    /// <summary>Светлый или тёмный вариант внутри выбранной палитры.</summary>
+    public static string Variant(string? skin) => IsDark(skin) ? Dark : Light;
+
+    /// <summary>Собирает строку темы из палитры и варианта.</summary>
+    public static string Combine(string family, string variant) => family == "ocean"
+        ? (variant == Dark ? OceanDark : OceanLight)
+        : (variant == Dark ? Dark : Light);
 
     /// <summary>Меняет палитру окна целиком.</summary>
     public static void Apply(string? skin)
     {
         var dark = IsDark(skin);
+        var ocean = IsOcean(skin);
 
         var palette = new ResourceDictionary
         {
             // Основной цвет текста и заливки активных элементов.
-            ["Ink"] = Solid(dark ? "#F4EFEA" : "#2B2733"),
+            ["Ink"] = Solid(ocean
+                ? (dark ? "#E4F1F7" : "#17324A")
+                : (dark ? "#F4EFEA" : "#2B2733")),
 
-            // Фон окна: тёплый крем или мягкая слива.
-            ["Paper"] = Solid(dark ? "#17151B" : "#FBF7F4"),
+            // Фон окна.
+            ["Paper"] = Solid(ocean
+                ? (dark ? "#0B1720" : "#EFF7FB")
+                : (dark ? "#17151B" : "#FBF7F4")),
 
             // Карточки, поля, подложка превью.
-            ["Surface"] = Solid(dark ? "#201D26" : "#FFFFFF"),
+            ["Surface"] = Solid(ocean
+                ? (dark ? "#12232E" : "#FFFFFF")
+                : (dark ? "#201D26" : "#FFFFFF")),
 
             // Второстепенный текст.
-            ["Grey"] = Solid(dark ? "#9C94A4" : "#8B8492"),
+            ["Grey"] = Solid(ocean
+                ? (dark ? "#8FA9B8" : "#6C8799")
+                : (dark ? "#9C94A4" : "#8B8492")),
 
             // Самый тихий текст, ползунок прокрутки.
-            ["Faint"] = Solid(dark ? "#5F5868" : "#C6BFC9"),
+            ["Faint"] = Solid(ocean
+                ? (dark ? "#4F6674" : "#B9CFDB")
+                : (dark ? "#5F5868" : "#C6BFC9")),
 
-            // Волосяные линии и рамки — чуть розовые, чтобы было нежно.
-            ["Rule"] = Solid(dark ? "#2F2A38" : "#EFE2DF"),
+            // Волосяные линии и рамки.
+            ["Rule"] = Solid(ocean
+                ? (dark ? "#1E3543" : "#D8E7EF")
+                : (dark ? "#2F2A38" : "#EFE2DF")),
 
             // Подсветка под курсором и фон активной вкладки.
-            ["Wash"] = Solid(dark ? "#262231" : "#F7EDEA"),
+            ["Wash"] = Solid(ocean
+                ? (dark ? "#17303D" : "#E3F1F7")
+                : (dark ? "#262231" : "#F7EDEA")),
 
-            // Нежный акцент: иероглиф в шапке, фокус, активные мелочи.
-            ["Rose"] = Solid(dark ? "#E8B4B9" : "#D98F96"),
+            // Акцент: иероглиф в шапке, фокус, активные мелочи.
+            ["Rose"] = Solid(ocean
+                ? (dark ? "#5BB6DE" : "#4C9BC4")
+                : (dark ? "#E8B4B9" : "#D98F96")),
 
             // Фоновая тянка: на белой теме чёрная, на чёрной — белоснежная.
-            ["Phantom"] = Solid(dark ? "#FFFFFF" : "#221E29")
+            ["Phantom"] = Solid(ocean
+                ? (dark ? "#FFFFFF" : "#123043")
+                : (dark ? "#FFFFFF" : "#221E29"))
         };
 
         var merged = Application.Current.Resources.MergedDictionaries;

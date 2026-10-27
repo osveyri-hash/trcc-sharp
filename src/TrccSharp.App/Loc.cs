@@ -54,6 +54,9 @@ public sealed class Loc : INotifyPropertyChanged
         ["header.screen"] = ("ЭКРАН СЖО · 320 × 240 · USB HID", "LCD · 320 × 240 · USB HID"),
 
         ["section.theme"] = ("ТЕМА", "THEME"),
+        ["theme.palette"] = ("ПАЛИТРА", "PALETTE"),
+        ["palette.cream"] = ("КРЕМ", "CREAM"),
+        ["palette.ocean"] = ("ОКЕАН", "OCEAN"),
         ["theme.window"] = ("ОКНО", "WINDOW"),
         ["theme.panel"] = ("ПАНЕЛЬ", "PANEL"),
         ["theme.light"] = ("БЕЛАЯ", "LIGHT"),

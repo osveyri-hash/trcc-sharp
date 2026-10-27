@@ -159,6 +159,48 @@ public sealed class ThemeStore
         }
     }
 
+    /// <summary>
+    /// Десять готовых тем «Монитора»: пять светлых и пять тёмных с разными
+    /// акцентами. Уже существующие темы с такими именами не перезаписываются.
+    /// </summary>
+    public void EnsureStarterThemes()
+    {
+        var starters = new (string Name, string Accent, bool Dark)[]
+        {
+            ("Роза · светлая",     "#D98F96", false),
+            ("Роза · тёмная",      "#D98F96", true),
+            ("Лаванда · светлая",  "#8E7CC3", false),
+            ("Лаванда · тёмная",   "#8E7CC3", true),
+            ("Олива · светлая",    "#7A9A5A", false),
+            ("Олива · тёмная",     "#7A9A5A", true),
+            ("Янтарь · светлая",   "#C7953F", false),
+            ("Янтарь · тёмная",    "#C7953F", true),
+            ("Сталь · светлая",    "#6B8CAE", false),
+            ("Сталь · тёмная",     "#6B8CAE", true)
+        };
+
+        var added = false;
+
+        foreach (var starter in starters)
+        {
+            if (IndexOf(starter.Name) >= 0) continue;
+
+            Items.Add(new ThemePreset
+            {
+                Name       = starter.Name,
+                Kind       = nameof(ThemeKind.Monitor),
+                Accent     = starter.Accent,
+                Dark       = starter.Dark,
+                Brightness = 100,
+                Fps        = 2
+            });
+
+            added = true;
+        }
+
+        if (added) Save();
+    }
+
     /// <summary>Тема с таким именем заменяется целиком (имя — ключ, без учёта регистра).</summary>
     public ThemePreset Upsert(ThemePreset preset)
     {

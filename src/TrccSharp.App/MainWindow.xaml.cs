@@ -149,6 +149,8 @@ public partial class MainWindow : Window
             (TileMedia, ThemeKind.Media)
         };
 
+        _themes.EnsureStarterThemes();
+
         PresetList.ItemsSource = _themes.Items;
         RefreshPresetHint();
         SeedRecentFromSettings();
@@ -260,14 +262,17 @@ public partial class MainWindow : Window
 
         if (SkinLight is not null)
         {
-            SkinLight.IsChecked = _skin == Skins.Light;
-            SkinDark.IsChecked = _skin == Skins.Dark;
+            SkinLight.IsChecked = Skins.Variant(_skin) == Skins.Light;
+            SkinDark.IsChecked = Skins.Variant(_skin) == Skins.Dark;
         }
+
+        UpdatePaletteButtons();
 
         // Программные подложки LiquidSegments не всегда ловят смену палитры сами.
         // Обновляем их после того, как выставлены IsChecked, иначе стекло
         // встанет на старый вариант.
         SkinSegments?.Refresh();
+        PaletteSegments?.Refresh();
         PanelSegments?.Refresh();
         ViewSegments?.Refresh();
         AutoSegments?.Refresh();
@@ -282,9 +287,32 @@ public partial class MainWindow : Window
     {
         if (sender is not ToggleButton option) return;
 
-        ApplySkin(option.Tag as string ?? Skins.Light);
+        var variant = (option.Tag as string) == "dark" ? Skins.Dark : Skins.Light;
+        var family = Skins.IsOcean(_skin) ? "ocean" : "cream";
+
+        ApplySkin(Skins.Combine(family, variant));
         option.IsChecked = true;
         SaveSettings();
+    }
+
+    private void OnPaletteClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton option) return;
+
+        var family = (option.Tag as string) == "ocean" ? "ocean" : "cream";
+        var variant = Skins.Variant(_skin);
+
+        ApplySkin(Skins.Combine(family, variant));
+        option.IsChecked = true;
+        SaveSettings();
+    }
+
+    private void UpdatePaletteButtons()
+    {
+        if (PaletteCream is null || PaletteOcean is null) return;
+
+        PaletteCream.IsChecked = !Skins.IsOcean(_skin);
+        PaletteOcean.IsChecked = Skins.IsOcean(_skin);
     }
 
     private void UpdateTitleBar()
@@ -294,7 +322,7 @@ public partial class MainWindow : Window
 
         var caption = ToColorRef(Skins.ColorOf("Paper"));
         var text = ToColorRef(Skins.ColorOf("Ink"));
-        var dark = _skin == Skins.Dark ? 1 : 0;
+        var dark = Skins.IsDark(_skin) ? 1 : 0;
 
         try
         {
@@ -454,6 +482,7 @@ public partial class MainWindow : Window
         AnimateLabelColumn(ViewLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(AutoLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(AutoOutputLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(PaletteLabelColumn, targetLabelWidth, duration, easing);
 
         foreach (var label in labels)
         {
@@ -488,6 +517,7 @@ public partial class MainWindow : Window
         if (ViewLabelColumn is not null) ViewLabelColumn.Width = value;
         if (AutoLabelColumn is not null) AutoLabelColumn.Width = value;
         if (AutoOutputLabelColumn is not null) AutoOutputLabelColumn.Width = value;
+        if (PaletteLabelColumn is not null) PaletteLabelColumn.Width = value;
     }
 
     private static void AnimateColumn(ColumnDefinition? column, double to, TimeSpan duration, IEasingFunction easing)
@@ -508,7 +538,7 @@ public partial class MainWindow : Window
 
     private IEnumerable<TextBlock> CollapsibleLabels() => new[]
     {
-        SectionTheme, RowWindowLabel, RowPanelLabel, RowViewLabel, RowAutoStartLabel,
+        SectionTheme, RowPaletteLabel, RowWindowLabel, RowPanelLabel, RowViewLabel, RowAutoStartLabel,
         RowAutoOutputLabel,
         SectionMedia, MediaText, RecentLabel,
         SectionMyThemes, ThemesHint

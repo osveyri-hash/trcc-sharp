@@ -588,6 +588,28 @@
 
                         <Grid Margin="0,0,0,7">
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="PaletteLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowPaletteLabel"
+                                       Text="{Binding [theme.palette], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <controls:LiquidSegments x:Name="PaletteSegments" Grid.Column="1"
+                                                     PillBrush="{DynamicResource Ink}"
+                                                     PillCornerRadius="9" ShowShells="True" ShellCornerRadius="9">
+                                <UniformGrid Columns="2">
+                                    <ToggleButton x:Name="PaletteCream" Style="{StaticResource Seg}" Tag="cream"
+                                                  Click="OnPaletteClick"
+                                                  Content="{Binding [palette.cream], Source={x:Static app:Loc.Instance}}" />
+                                    <ToggleButton x:Name="PaletteOcean" Style="{StaticResource Seg}" Tag="ocean"
+                                                  Margin="6,0,0,0" Click="OnPaletteClick"
+                                                  Content="{Binding [palette.ocean], Source={x:Static app:Loc.Instance}}" />
+                                </UniformGrid>
+                            </controls:LiquidSegments>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,7">
+                            <Grid.ColumnDefinitions>
                                 <ColumnDefinition x:Name="WindowLabelColumn" Width="64" />
                                 <ColumnDefinition Width="*" />
                             </Grid.ColumnDefinitions>
