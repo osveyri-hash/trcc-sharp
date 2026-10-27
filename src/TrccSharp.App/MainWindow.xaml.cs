@@ -216,6 +216,7 @@ public partial class MainWindow : Window
                 BackdropMask.ImageSource = Backdrop.Load();
 
             UpdateAutoStartButtons();
+            UpdateAutoOutputButtons();
             RefreshRecent();
             PlaceGlass(animate: false);
 
@@ -229,8 +230,10 @@ public partial class MainWindow : Window
             if (_glassPlaced) PlaceGlass(animate: false);
         };
 
-        // --auto (ярлык) и --autostart (Windows): сразу начинать вывод.
-        if (Startup.IsAutoStart || args.Any(a => a.Equals("--auto", StringComparison.OrdinalIgnoreCase)))
+        // --auto (ярлык), --autostart (Windows) или включённый «АВТОВЫВОД».
+        if (Startup.IsAutoStart
+            || _settings.AutoOutput
+            || args.Any(a => a.Equals("--auto", StringComparison.OrdinalIgnoreCase)))
             Loaded += async (_, _) => await StartSendingWithRetryAsync();
 
         if (Startup.IsAutoStart)
@@ -268,6 +271,7 @@ public partial class MainWindow : Window
         PanelSegments?.Refresh();
         ViewSegments?.Refresh();
         AutoSegments?.Refresh();
+        AutoOutputSegments?.Refresh();
         TabSegments?.Refresh();
         LangSegments?.Refresh();
 
@@ -386,6 +390,26 @@ public partial class MainWindow : Window
         SetLog("log.autostart", Loc.T(_settings.AutoStart ? "startup.on" : "startup.off"));
     }
 
+    // ── Автовывод при запуске ───────────────────────────────────────────────
+
+    private void UpdateAutoOutputButtons()
+    {
+        if (AutoOutputOff is null || AutoOutputOn is null) return;
+
+        AutoOutputOff.IsChecked = !_settings.AutoOutput;
+        AutoOutputOn.IsChecked = _settings.AutoOutput;
+    }
+
+    private void OnAutoOutputClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton option) return;
+
+        _settings.AutoOutput = (option.Tag as string) == "on";
+        UpdateAutoOutputButtons();
+        SaveSettings();
+        SetLog("log.autoOutput", Loc.T(_settings.AutoOutput ? "startup.on" : "startup.off"));
+    }
+
     // ── Три полоски: свёрнутая левая панель ─────────────────────────────────
 
     /// <summary>
@@ -429,6 +453,7 @@ public partial class MainWindow : Window
         AnimateLabelColumn(PanelLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(ViewLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(AutoLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(AutoOutputLabelColumn, targetLabelWidth, duration, easing);
 
         foreach (var label in labels)
         {
@@ -462,6 +487,7 @@ public partial class MainWindow : Window
         if (PanelLabelColumn is not null) PanelLabelColumn.Width = value;
         if (ViewLabelColumn is not null) ViewLabelColumn.Width = value;
         if (AutoLabelColumn is not null) AutoLabelColumn.Width = value;
+        if (AutoOutputLabelColumn is not null) AutoOutputLabelColumn.Width = value;
     }
 
     private static void AnimateColumn(ColumnDefinition? column, double to, TimeSpan duration, IEasingFunction easing)
@@ -483,6 +509,7 @@ public partial class MainWindow : Window
     private IEnumerable<TextBlock> CollapsibleLabels() => new[]
     {
         SectionTheme, RowWindowLabel, RowPanelLabel, RowViewLabel, RowAutoStartLabel,
+        RowAutoOutputLabel,
         SectionMedia, MediaText, RecentLabel,
         SectionMyThemes, ThemesHint
     };

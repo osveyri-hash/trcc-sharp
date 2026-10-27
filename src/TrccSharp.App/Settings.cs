@@ -34,6 +34,9 @@ public sealed class Settings
     /// <summary>Запускать экран СЖО при входе в Windows.</summary>
     public bool AutoStart { get; set; } = true;
 
+    /// <summary>Сразу включать вывод на панель при запуске приложения.</summary>
+    public bool AutoOutput { get; set; } = true;
+
     /// <summary>Левая панель свёрнута до одних контролов (кнопка «три полоски»).</summary>
     public bool Compact { get; set; }
 

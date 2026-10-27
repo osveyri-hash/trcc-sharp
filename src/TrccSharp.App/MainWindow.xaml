@@ -737,6 +737,29 @@
                             </controls:LiquidSegments>
                         </Grid>
 
+                        <Grid Margin="0,7,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="AutoOutputLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowAutoOutputLabel"
+                                       Text="{Binding [startup.autoOutput], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center"
+                                       ToolTip="{Binding [startup.autoOutput.tip], Source={x:Static app:Loc.Instance}}" />
+                            <controls:LiquidSegments x:Name="AutoOutputSegments" Grid.Column="1"
+                                                     PillBrush="{DynamicResource Ink}"
+                                                     PillCornerRadius="9" ShowShells="True" ShellCornerRadius="9">
+                                <UniformGrid Columns="2">
+                                    <ToggleButton x:Name="AutoOutputOff" Style="{StaticResource Seg}" Tag="off"
+                                                  Click="OnAutoOutputClick"
+                                                  Content="{Binding [startup.off], Source={x:Static app:Loc.Instance}}" />
+                                    <ToggleButton x:Name="AutoOutputOn" Style="{StaticResource Seg}" Tag="on"
+                                                  Margin="6,0,0,0" Click="OnAutoOutputClick"
+                                                  Content="{Binding [startup.on], Source={x:Static app:Loc.Instance}}" />
+                                </UniformGrid>
+                            </controls:LiquidSegments>
+                        </Grid>
+
                     </StackPanel>
 
                     <!-- Вкладка «Темы» -->

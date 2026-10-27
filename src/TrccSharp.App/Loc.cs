@@ -133,11 +133,15 @@ public sealed class Loc : INotifyPropertyChanged
 
         ["section.startup"] = ("ЗАПУСК", "STARTUP"),
         ["startup.auto"] = ("АВТОЗАПУСК", "AUTOSTART"),
+        ["startup.autoOutput"] = ("АВТОВЫВОД", "AUTO OUTPUT"),
+        ["startup.autoOutput.tip"] = ("Сразу включать вывод на панель при запуске приложения",
+            "Start panel output automatically when the app opens"),
         ["startup.off"] = ("ВЫКЛ", "OFF"),
         ["startup.on"] = ("ВКЛ", "ON"),
         ["startup.tip"] = ("Запускать экран СЖО при входе в Windows",
             "Start the LCD automatically at sign-in"),
         ["log.autostart"] = ("автозапуск: {0}", "autostart: {0}"),
+        ["log.autoOutput"] = ("автовывод: {0}", "auto output: {0}"),
 
         ["recent.title"] = ("НЕДАВНИЕ", "RECENT"),
         ["recent.tip"] = ("Нажми, чтобы применить снова", "Click to apply again"),
