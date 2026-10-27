@@ -16,6 +16,28 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        // --set-autostart on|off: установщик включает/выключает автозапуск
+        // до первого окна. Работает и когда приложение уже запущено.
+        var autoIndex = Array.FindIndex(e.Args,
+            a => a.Equals("--set-autostart", StringComparison.OrdinalIgnoreCase));
+
+        if (autoIndex >= 0)
+        {
+            var on = autoIndex + 1 < e.Args.Length
+                     && (e.Args[autoIndex + 1].Equals("on", StringComparison.OrdinalIgnoreCase)
+                         || e.Args[autoIndex + 1].Equals("1", StringComparison.OrdinalIgnoreCase));
+
+            var settings = Settings.Load();
+            settings.AutoStart = on;
+            settings.Save();
+
+            if (on) TrccSharp.App.Startup.Enable();
+            else TrccSharp.App.Startup.Disable();
+
+            Shutdown();
+            return;
+        }
+
         // --dump <папка>: сохранить кадры всех тем в PNG и выйти.
         // Нужен для проверки отрисовки без панели и для превью в документации.
         var dumpIndex = Array.FindIndex(e.Args, a => a.Equals("--dump", StringComparison.OrdinalIgnoreCase));

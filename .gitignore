@@ -2,6 +2,7 @@
 bin/
 obj/
 dist/
+dist-installer/
 *.user
 *.suo
 .vs/

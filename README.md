@@ -63,6 +63,13 @@ ADL2_New_QueryPMLogData_Get → ADLPMLogDataOutput
 Считать число адаптеров надо контекстной функцией `ADL2_...`: глобальная
 `ADL_Adapter_NumberOfAdapters_Get` здесь отдаёт 0.
 
+## Установка
+
+Готовый установщик и портативный exe — в [Releases](https://github.com/osveyri-hash/trcc-sharp/releases/latest):
+
+- `TrccSharp-0.2.1-setup.exe` — ставится в `%LOCALAPPDATA%\Programs\TrccSharp` без прав администратора. Создаёт ярлык в меню «Пуск», ярлык на рабочем столе (галочка в установщике) и, если отмечен автозапуск, запускается при входе в Windows скрыто в трее.
+- `TrccSharp.exe` — портативный вариант: просто запустить, ничего не устанавливается.
+
 ## Запуск
 
 Готовый бинарник не требует установленного .NET:

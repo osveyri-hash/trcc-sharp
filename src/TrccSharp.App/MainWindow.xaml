@@ -4,6 +4,7 @@
         xmlns:app="clr-namespace:TrccSharp.App"
         xmlns:controls="clr-namespace:TrccSharp.App.Controls"
         Title="TrccSharp — экран СЖО"
+        Icon="assets/TrccSharp.ico"
         Height="880" Width="1180" MinHeight="700" MinWidth="1040"
         Background="{DynamicResource Paper}" Foreground="{DynamicResource Ink}"
         FontFamily="Segoe UI" FontSize="13"
