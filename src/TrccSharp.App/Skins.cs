@@ -4,9 +4,10 @@ using System.Windows.Media;
 namespace TrccSharp.App;
 
 /// <summary>
-/// Палитры окна. «Крем» — тёплая светлая/тёмная пара, «Океан» — холодная
-/// голубая/ночная. Кисти живут в ресурсах приложения, разметка ссылается
-/// на них через DynamicResource, поэтому переключение идёт на лету.
+/// Палитры окна. Каждая семья — своя пара «светлая/тёмная»: «Крем» тёплая
+/// бумажная, «Океан» холодная голубая, «Сакура» розовая, «Лес» зелёная.
+/// Кисти живут в ресурсах приложения, разметка ссылается на них через
+/// DynamicResource, поэтому переключение идёт на лету.
 /// </summary>
 public static class Skins
 {
@@ -14,84 +15,154 @@ public static class Skins
     public const string Dark = "dark";
     public const string OceanLight = "ocean-light";
     public const string OceanDark = "ocean-dark";
+    public const string SakuraLight = "sakura-light";
+    public const string SakuraDark = "sakura-dark";
+    public const string ForestLight = "forest-light";
+    public const string ForestDark = "forest-dark";
+
+    /// <summary>Одна палитра: девять красок, из которых живёт всё окно.</summary>
+    private sealed record Palette(
+        string Ink,
+        string Paper,
+        string Surface,
+        string Grey,
+        string Faint,
+        string Rule,
+        string Wash,
+        string Rose,
+        string Phantom);
+
+    private static readonly Palette CreamLight = new(
+        Ink: "#2B2733", Paper: "#FBF7F4", Surface: "#FFFFFF",
+        Grey: "#8B8492", Faint: "#C6BFC9", Rule: "#EFE2DF",
+        Wash: "#F7EDEA", Rose: "#D98F96", Phantom: "#221E29");
+
+    private static readonly Palette CreamDark = new(
+        Ink: "#F4EFEA", Paper: "#17151B", Surface: "#201D26",
+        Grey: "#9C94A4", Faint: "#5F5868", Rule: "#2F2A38",
+        Wash: "#262231", Rose: "#E8B4B9", Phantom: "#FFFFFF");
+
+    private static readonly Palette OceanLightPalette = new(
+        Ink: "#17324A", Paper: "#EFF7FB", Surface: "#FFFFFF",
+        Grey: "#6C8799", Faint: "#B9CFDB", Rule: "#D8E7EF",
+        Wash: "#E3F1F7", Rose: "#4C9BC4", Phantom: "#123043");
+
+    private static readonly Palette OceanDarkPalette = new(
+        Ink: "#E4F1F7", Paper: "#0B1720", Surface: "#12232E",
+        Grey: "#8FA9B8", Faint: "#4F6674", Rule: "#1E3543",
+        Wash: "#17303D", Rose: "#5BB6DE", Phantom: "#FFFFFF");
+
+    // Светлая сакура: тёплая бумага с розовым подтоном, тушь — сливовая.
+    private static readonly Palette SakuraLightPalette = new(
+        Ink: "#3A2230", Paper: "#FFF8FA", Surface: "#FFFFFF",
+        Grey: "#9A7C89", Faint: "#DCC3CF", Rule: "#F4DEE7",
+        Wash: "#FDEEF3", Rose: "#D4708C", Phantom: "#3A2230");
+
+    private static readonly Palette SakuraDarkPalette = new(
+        Ink: "#F7E8EE", Paper: "#171016", Surface: "#221A20",
+        Grey: "#A98F9B", Faint: "#6B5560", Rule: "#33242C",
+        Wash: "#2A1E25", Rose: "#E79AB0", Phantom: "#FFFFFF");
+
+    // Лес: светлая бумага с зеленцой, тёмная — почти хвойная.
+    private static readonly Palette ForestLightPalette = new(
+        Ink: "#1E2E23", Paper: "#F4F8F4", Surface: "#FFFFFF",
+        Grey: "#6F8474", Faint: "#BACBBE", Rule: "#DCE9DE",
+        Wash: "#EAF3EC", Rose: "#4F8A5F", Phantom: "#1E2E23");
+
+    private static readonly Palette ForestDarkPalette = new(
+        Ink: "#E6F0E8", Paper: "#0E1511", Surface: "#16201A",
+        Grey: "#8FA795", Faint: "#56685C", Rule: "#23302A",
+        Wash: "#1A2620", Rose: "#7FBF8F", Phantom: "#FFFFFF");
+
+    private static readonly Dictionary<string, (Palette Light, Palette Dark)> Families = new()
+    {
+        ["cream"] = (CreamLight, CreamDark),
+        ["ocean"] = (OceanLightPalette, OceanDarkPalette),
+        ["sakura"] = (SakuraLightPalette, SakuraDarkPalette),
+        ["forest"] = (ForestLightPalette, ForestDarkPalette)
+    };
+
+    /// <summary>Семейства в том порядке, в каком они стоят в строке палитр.</summary>
+    public static IReadOnlyList<string> FamilyKeys { get; } = new[] { "cream", "ocean", "sakura", "forest" };
 
     public static string Normalize(string? skin) => skin switch
     {
         Dark => Dark,
         OceanLight => OceanLight,
         OceanDark => OceanDark,
+        SakuraLight => SakuraLight,
+        SakuraDark => SakuraDark,
+        ForestLight => ForestLight,
+        ForestDark => ForestDark,
         _ => Light
     };
 
-    public static bool IsDark(string? skin) => Normalize(skin) is Dark or OceanDark;
+    public static bool IsDark(string? skin) =>
+        Normalize(skin) is Dark or OceanDark or SakuraDark or ForestDark;
 
-    public static bool IsOcean(string? skin) => Normalize(skin) is OceanLight or OceanDark;
+    /// <summary>Семейство палитры: cream, ocean, sakura или forest.</summary>
+    public static string Family(string? skin) => Normalize(skin) switch
+    {
+        OceanLight or OceanDark => "ocean",
+        SakuraLight or SakuraDark => "sakura",
+        ForestLight or ForestDark => "forest",
+        _ => "cream"
+    };
 
     /// <summary>Светлый или тёмный вариант внутри выбранной палитры.</summary>
     public static string Variant(string? skin) => IsDark(skin) ? Dark : Light;
 
-    /// <summary>Собирает строку темы из палитры и варианта.</summary>
-    public static string Combine(string family, string variant) => family == "ocean"
-        ? (variant == Dark ? OceanDark : OceanLight)
-        : (variant == Dark ? Dark : Light);
+    /// <summary>Собирает строку темы из семейства и варианта.</summary>
+    public static string Combine(string family, string variant)
+    {
+        var key = Families.ContainsKey(family) ? family : "cream";
+        var dark = variant == Dark;
+
+        if (key == "cream") return dark ? Dark : Light;
+
+        return $"{key}-{(dark ? Dark : Light)}";
+    }
 
     /// <summary>Меняет палитру окна целиком.</summary>
     public static void Apply(string? skin)
     {
-        var dark = IsDark(skin);
-        var ocean = IsOcean(skin);
+        var normalized = Normalize(skin);
+        var pair = Families[Family(normalized)];
+        var palette = IsDark(normalized) ? pair.Dark : pair.Light;
 
-        var palette = new ResourceDictionary
+        var resources = new ResourceDictionary
         {
             // Основной цвет текста и заливки активных элементов.
-            ["Ink"] = Solid(ocean
-                ? (dark ? "#E4F1F7" : "#17324A")
-                : (dark ? "#F4EFEA" : "#2B2733")),
+            ["Ink"] = Solid(palette.Ink),
 
             // Фон окна.
-            ["Paper"] = Solid(ocean
-                ? (dark ? "#0B1720" : "#EFF7FB")
-                : (dark ? "#17151B" : "#FBF7F4")),
+            ["Paper"] = Solid(palette.Paper),
 
             // Карточки, поля, подложка превью.
-            ["Surface"] = Solid(ocean
-                ? (dark ? "#12232E" : "#FFFFFF")
-                : (dark ? "#201D26" : "#FFFFFF")),
+            ["Surface"] = Solid(palette.Surface),
 
             // Второстепенный текст.
-            ["Grey"] = Solid(ocean
-                ? (dark ? "#8FA9B8" : "#6C8799")
-                : (dark ? "#9C94A4" : "#8B8492")),
+            ["Grey"] = Solid(palette.Grey),
 
             // Самый тихий текст, ползунок прокрутки.
-            ["Faint"] = Solid(ocean
-                ? (dark ? "#4F6674" : "#B9CFDB")
-                : (dark ? "#5F5868" : "#C6BFC9")),
+            ["Faint"] = Solid(palette.Faint),
 
             // Волосяные линии и рамки.
-            ["Rule"] = Solid(ocean
-                ? (dark ? "#1E3543" : "#D8E7EF")
-                : (dark ? "#2F2A38" : "#EFE2DF")),
+            ["Rule"] = Solid(palette.Rule),
 
             // Подсветка под курсором и фон активной вкладки.
-            ["Wash"] = Solid(ocean
-                ? (dark ? "#17303D" : "#E3F1F7")
-                : (dark ? "#262231" : "#F7EDEA")),
+            ["Wash"] = Solid(palette.Wash),
 
             // Акцент: иероглиф в шапке, фокус, активные мелочи.
-            ["Rose"] = Solid(ocean
-                ? (dark ? "#5BB6DE" : "#4C9BC4")
-                : (dark ? "#E8B4B9" : "#D98F96")),
+            ["Rose"] = Solid(palette.Rose),
 
             // Фоновая тянка: на белой теме чёрная, на чёрной — белоснежная.
-            ["Phantom"] = Solid(ocean
-                ? (dark ? "#FFFFFF" : "#123043")
-                : (dark ? "#FFFFFF" : "#221E29"))
+            ["Phantom"] = Solid(palette.Phantom)
         };
 
         var merged = Application.Current.Resources.MergedDictionaries;
         merged.Clear();
-        merged.Add(palette);
+        merged.Add(resources);
     }
 
     /// <summary>Цвет кисти из текущей палитры (для заголовка окна).</summary>

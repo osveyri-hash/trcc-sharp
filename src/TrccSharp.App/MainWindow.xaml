@@ -446,7 +446,9 @@
              стекла, тёмные — ровно под ним, поэтому надпись читается всегда,
              даже когда стекло проезжает над ней. -->
         <Grid Grid.Row="2" Margin="0,0,0,16">
-            <UniformGrid Rows="1" Columns="3">
+            <UniformGrid Rows="1" Columns="5">
+                <Border Style="{StaticResource TileShell}" Margin="0,0,10,0" />
+                <Border Style="{StaticResource TileShell}" Margin="0,0,10,0" />
                 <Border Style="{StaticResource TileShell}" Margin="0,0,10,0" />
                 <Border Style="{StaticResource TileShell}" Margin="0,0,10,0" />
                 <Border Style="{StaticResource TileShell}" />
@@ -482,7 +484,7 @@
                     <RectangleGeometry x:Name="TileInvertClip" Rect="0,0,0,0" />
                 </Grid.Clip>
 
-                <UniformGrid Rows="1" Columns="3">
+                <UniformGrid Rows="1" Columns="5">
                     <StackPanel Orientation="Horizontal" Margin="16,0,10,0" VerticalAlignment="Center">
                         <TextBlock Text="監視" FontFamily="Yu Gothic UI" FontSize="20"
                                    Foreground="{DynamicResource Paper}" />
@@ -499,10 +501,26 @@
                                    Foreground="{DynamicResource Paper}" />
                     </StackPanel>
 
-                    <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Margin="16,0,10,0" VerticalAlignment="Center">
                         <TextBlock Text="画像" FontFamily="Yu Gothic UI" FontSize="20"
                                    Foreground="{DynamicResource Paper}" />
                         <TextBlock Text="{Binding [tile.media], Source={x:Static app:Loc.Instance}}" FontSize="11"
+                                   Margin="10,0,0,3" VerticalAlignment="Bottom"
+                                   Foreground="{DynamicResource Paper}" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="16,0,10,0" VerticalAlignment="Center">
+                        <TextBlock Text="履歴" FontFamily="Yu Gothic UI" FontSize="20"
+                                   Foreground="{DynamicResource Paper}" />
+                        <TextBlock Text="{Binding [tile.history], Source={x:Static app:Loc.Instance}}" FontSize="11"
+                                   Margin="10,0,0,3" VerticalAlignment="Bottom"
+                                   Foreground="{DynamicResource Paper}" />
+                    </StackPanel>
+
+                    <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="環" FontFamily="Yu Gothic UI" FontSize="20"
+                                   Foreground="{DynamicResource Paper}" />
+                        <TextBlock Text="{Binding [tile.rings], Source={x:Static app:Loc.Instance}}" FontSize="11"
                                    Margin="10,0,0,3" VerticalAlignment="Bottom"
                                    Foreground="{DynamicResource Paper}" />
                     </StackPanel>
@@ -510,7 +528,7 @@
             </Grid>
 
             <!-- Светлые подписи и клик: всё, что остаётся вне стекла -->
-            <UniformGrid x:Name="TileLabelLayer" Rows="1" Columns="3">
+            <UniformGrid x:Name="TileLabelLayer" Rows="1" Columns="5">
                 <UniformGrid.Clip>
                     <CombinedGeometry GeometryCombineMode="Exclude">
                         <CombinedGeometry.Geometry1>
@@ -545,11 +563,33 @@
                 </ToggleButton>
 
                 <ToggleButton x:Name="TileMedia" Style="{StaticResource Tile}" Tag="Media"
-                              Click="OnThemeTileClick">
+                              Margin="0,0,10,0" Click="OnThemeTileClick">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock Text="画像" FontFamily="Yu Gothic UI" FontSize="20"
                                    Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
                         <TextBlock Text="{Binding [tile.media], Source={x:Static app:Loc.Instance}}" FontSize="11"
+                                   Margin="10,0,0,3" VerticalAlignment="Bottom"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                    </StackPanel>
+                </ToggleButton>
+
+                <ToggleButton x:Name="TileHistory" Style="{StaticResource Tile}" Tag="History"
+                              Margin="0,0,10,0" Click="OnThemeTileClick">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="履歴" FontFamily="Yu Gothic UI" FontSize="20"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                        <TextBlock Text="{Binding [tile.history], Source={x:Static app:Loc.Instance}}" FontSize="11"
+                                   Margin="10,0,0,3" VerticalAlignment="Bottom"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                    </StackPanel>
+                </ToggleButton>
+
+                <ToggleButton x:Name="TileRings" Style="{StaticResource Tile}" Tag="Rings"
+                              Click="OnThemeTileClick">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="環" FontFamily="Yu Gothic UI" FontSize="20"
+                                   Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
+                        <TextBlock Text="{Binding [tile.rings], Source={x:Static app:Loc.Instance}}" FontSize="11"
                                    Margin="10,0,0,3" VerticalAlignment="Bottom"
                                    Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}" />
                     </StackPanel>
@@ -597,13 +637,19 @@
                             <controls:LiquidSegments x:Name="PaletteSegments" Grid.Column="1"
                                                      PillBrush="{DynamicResource Ink}"
                                                      PillCornerRadius="9" ShowShells="True" ShellCornerRadius="9">
-                                <UniformGrid Columns="2">
+                                <UniformGrid Columns="4">
                                     <ToggleButton x:Name="PaletteCream" Style="{StaticResource Seg}" Tag="cream"
                                                   Click="OnPaletteClick"
                                                   Content="{Binding [palette.cream], Source={x:Static app:Loc.Instance}}" />
                                     <ToggleButton x:Name="PaletteOcean" Style="{StaticResource Seg}" Tag="ocean"
                                                   Margin="6,0,0,0" Click="OnPaletteClick"
                                                   Content="{Binding [palette.ocean], Source={x:Static app:Loc.Instance}}" />
+                                    <ToggleButton x:Name="PaletteSakura" Style="{StaticResource Seg}" Tag="sakura"
+                                                  Margin="6,0,0,0" Click="OnPaletteClick"
+                                                  Content="{Binding [palette.sakura], Source={x:Static app:Loc.Instance}}" />
+                                    <ToggleButton x:Name="PaletteForest" Style="{StaticResource Seg}" Tag="forest"
+                                                  Margin="6,0,0,0" Click="OnPaletteClick"
+                                                  Content="{Binding [palette.forest], Source={x:Static app:Loc.Instance}}" />
                                 </UniformGrid>
                             </controls:LiquidSegments>
                         </Grid>

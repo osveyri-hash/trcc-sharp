@@ -57,6 +57,8 @@ public sealed class Loc : INotifyPropertyChanged
         ["theme.palette"] = ("ПАЛИТРА", "PALETTE"),
         ["palette.cream"] = ("КРЕМ", "CREAM"),
         ["palette.ocean"] = ("ОКЕАН", "OCEAN"),
+        ["palette.sakura"] = ("САКУРА", "SAKURA"),
+        ["palette.forest"] = ("ЛЕС", "FOREST"),
         ["theme.window"] = ("ОКНО", "WINDOW"),
         ["theme.panel"] = ("ПАНЕЛЬ", "PANEL"),
         ["theme.light"] = ("БЕЛАЯ", "LIGHT"),
@@ -111,6 +113,8 @@ public sealed class Loc : INotifyPropertyChanged
         ["tile.monitor"] = ("Монитор", "Monitor"),
         ["tile.clock"] = ("Часы", "Clock"),
         ["tile.media"] = ("Медиа", "Media"),
+        ["tile.history"] = ("График", "Graph"),
+        ["tile.rings"] = ("Кольца", "Rings"),
         ["tile.minimal"] = ("Минимал", "Minimal"),
         ["tile.test"] = ("Тест", "Test"),
 

@@ -14,6 +14,8 @@ public enum ThemeKind
     Clock,
     Media,
     Minimal,
+    History,
+    Rings,
     Test
 }
 
@@ -97,6 +99,13 @@ public static class ThemeRenderer
     private static int _bufferIndex;
     private static Surface? _testPattern;
 
+    // История для темы «График»: кольцевой буфер из 96 отсчётов.
+    private const int HistorySamples = 96;
+    private static readonly double[] CpuHistory = new double[HistorySamples];
+    private static readonly double[] RamHistory = new double[HistorySamples];
+    private static int _historyHead;
+    private static int _historyCount;
+
     // Кадр «Медиа» с подписью: свой буфер, чтобы не портить кэш клипа.
     private static Surface? _mediaFrame;
     private static MediaClip? _mediaSource;
@@ -148,6 +157,12 @@ public static class ThemeRenderer
                     break;
                 case ThemeKind.Minimal:
                     DrawMinimal(dc, sensors, text);
+                    break;
+                case ThemeKind.History:
+                    DrawHistory(dc, sensors, text);
+                    break;
+                case ThemeKind.Rings:
+                    DrawRings(dc, sensors, text);
                     break;
                 case ThemeKind.Media:
                     DrawMediaHint(dc, text);
@@ -315,6 +330,158 @@ public static class ThemeRenderer
         DrawText(dc, FormatUptime(sensors.Uptime), 250, 182, 12, Grey, Regular);
 
         DrawCaption(dc, caption);
+    }
+
+    /// <summary>
+    /// Тема «График»: крупная загрузка ЦП и две кривые за последние полсотни секунд.
+    /// История копится только пока тема на экране — в остальных темах она не нужна.
+    /// </summary>
+    private static void DrawHistory(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "履歴", "ГРАФИК");
+
+        PushHistory(sensors);
+
+        var big = Text($"{sensors.CpuLoadPercent:0}", 44, Ink, Thin);
+        dc.DrawText(big, new Point(20, 28));
+        DrawText(dc, "%", 24 + big.Width, 60, 16, Grey, Regular);
+        DrawTracked(dc, "ЗАГРУЗКА ЦП", 22, 92, 8.5, Grey, 1.6);
+
+        DrawTracked(dc, "ОЗУ", 206, 34, 8.5, Grey, 1.6);
+        DrawText(dc, $"{sensors.RamUsedGb:0.0} / {sensors.RamTotalGb:0.0} ГБ", 206, 46, 13, Ink, Regular);
+
+        DrawTracked(dc, "ГП", 206, 72, 8.5, Grey, 1.6);
+        DrawText(dc, sensors.GpuTempC is { } gpu ? $"{gpu:0} °C" : "—", 206, 84, 13, Ink, Regular);
+
+        // Поле графика: сетка по четвертям и две кривые — ЦП акцентом, ОЗУ серым.
+        const double left = 20, right = 300, top = 106, bottom = 172;
+
+        for (var i = 0; i <= 3; i++)
+        {
+            var y = top + (bottom - top) * i / 3;
+            DrawRule(dc, left, Math.Round(y), right - left);
+        }
+
+        var accentPen = new Pen(_accentBrush, 1.6)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        accentPen.Freeze();
+
+        var greyPen = new Pen(Grey, 1)
+        {
+            StartLineCap = PenLineCap.Round,
+            EndLineCap = PenLineCap.Round,
+            LineJoin = PenLineJoin.Round
+        };
+        greyPen.Freeze();
+
+        DrawSpark(dc, RamHistory, left, top, right - left, bottom - top, greyPen);
+        DrawSpark(dc, CpuHistory, left, top, right - left, bottom - top, accentPen);
+
+        // Легенда слева, время работы справа — одной тихой строкой.
+        dc.DrawRectangle(_accentBrush, null, new Rect(22, 188, 9, 2));
+        DrawTracked(dc, "ЦП", 35, 184, 8, Grey, 1.3);
+        dc.DrawRectangle(Grey, null, new Rect(60, 188, 9, 2));
+        DrawTracked(dc, "ОЗУ", 73, 184, 8, Grey, 1.3);
+
+        var uptime = Text($"СИСТЕМА {FormatUptime(sensors.Uptime)}", 8, Faint, Regular);
+        dc.DrawText(uptime, new Point(300 - uptime.Width, 184));
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>
+    /// Тема «Кольца»: три круговых индикатора — ЦП, ОЗУ и температура ГП.
+    /// Температура переводится в долю по шкале 30…90 °C.
+    /// </summary>
+    private static void DrawRings(DrawingContext dc, SensorSnapshot sensors, string? caption)
+    {
+        DrawHeader(dc, "環", "КОЛЬЦА");
+
+        var cpu = Math.Clamp(sensors.CpuLoadPercent / 100, 0, 1);
+        var ram = Math.Clamp(sensors.RamLoadPercent / 100, 0, 1);
+        var gpu = sensors.GpuTempC is { } temp ? Math.Clamp((temp - 30) / 60, 0, 1) : 0;
+
+        Ring(dc, 62, cpu, $"{sensors.CpuLoadPercent:0}", "ЦП", $"{sensors.CpuLoadPercent:0} %");
+        Ring(dc, 160, ram, $"{sensors.RamLoadPercent:0}", "ОЗУ", $"{sensors.RamUsedGb:0.0} ГБ");
+        Ring(dc, 258, gpu, sensors.GpuTempC is { } t ? $"{t:0}" : "—", "ГП",
+            sensors.GpuTempC is { } c ? $"{c:0} °C" : "нет данных");
+
+        DrawRule(dc, 22, 186, 276);
+
+        DrawText(dc, $"СИСТЕМА {FormatUptime(sensors.Uptime)}", 22, 194, 9, Faint, Regular);
+        DrawText(dc, $"ОЗУ {sensors.RamTotalGb:0.0} ГБ", 226, 194, 9, Faint, Regular);
+
+        DrawCaption(dc, caption);
+    }
+
+    /// <summary>Один индикатор темы «Кольца»: дуга, число в центре, подписи снизу.</summary>
+    private static void Ring(DrawingContext dc, double cx, double fraction, string value, string title, string detail)
+    {
+        const double cy = 108, radius = 32, thickness = 3.5;
+
+        DrawRing(dc, cx, cy, radius, thickness, fraction);
+        DrawCentered(dc, value, cx, cy, 20, Ink, Thin);
+        DrawTrackedCentered(dc, title, cx, 150, 8.5, Grey, 1.6);
+        DrawCentered(dc, detail, cx, 172, 10, Grey, Regular);
+    }
+
+    /// <summary>Добавляет текущие показания в историю темы «График».</summary>
+    private static void PushHistory(SensorSnapshot sensors)
+    {
+        var cpu = Math.Clamp(sensors.CpuLoadPercent, 0, 100);
+        var ram = Math.Clamp(sensors.RamLoadPercent, 0, 100);
+
+        // Первый кадр — ровная линия на всю ширину, чтобы поле не пустовало.
+        if (_historyCount == 0)
+        {
+            Array.Fill(CpuHistory, cpu);
+            Array.Fill(RamHistory, ram);
+            _historyCount = HistorySamples;
+            _historyHead = 0;
+        }
+
+        CpuHistory[_historyHead] = cpu;
+        RamHistory[_historyHead] = ram;
+
+        _historyHead = (_historyHead + 1) % HistorySamples;
+        if (_historyCount < HistorySamples) _historyCount++;
+    }
+
+    /// <summary>Кривая истории: свежий отсчёт прижат к правому краю поля.</summary>
+    private static void DrawSpark(DrawingContext dc, double[] values,
+        double x, double y, double width, double height, Pen pen)
+    {
+        if (_historyCount < 2) return;
+
+        var step = width / (HistorySamples - 1);
+        var geometry = new StreamGeometry();
+
+        using (var ctx = geometry.Open())
+        {
+            for (var i = 0; i < _historyCount; i++)
+            {
+                var index = (_historyHead - _historyCount + i + HistorySamples * 2) % HistorySamples;
+                var value = Math.Clamp(values[index], 0, 100);
+                var px = x + width - (_historyCount - 1 - i) * step;
+                var py = y + height - height * value / 100;
+
+                if (i == 0) ctx.BeginFigure(new Point(px, py), false, false);
+                else ctx.LineTo(new Point(px, py), true, false);
+            }
+        }
+
+        geometry.Freeze();
+        dc.DrawGeometry(null, pen, geometry);
+
+        // Свежий отсчёт — точкой на правом краю поля.
+        var lastIndex = (_historyHead - 1 + HistorySamples) % HistorySamples;
+        var lastValue = Math.Clamp(values[lastIndex], 0, 100);
+        var lastPoint = new Point(x + width, y + height - height * lastValue / 100);
+        dc.DrawEllipse(pen.Brush, null, lastPoint, 2.2, 2.2);
     }
 
     /// <summary>Заглушка темы «Медиа», пока файл не выбран.</summary>

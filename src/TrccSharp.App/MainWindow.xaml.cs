@@ -150,7 +150,9 @@ public partial class MainWindow : Window
         {
             (TileMonitor, ThemeKind.Monitor),
             (TileClock, ThemeKind.Clock),
-            (TileMedia, ThemeKind.Media)
+            (TileMedia, ThemeKind.Media),
+            (TileHistory, ThemeKind.History),
+            (TileRings, ThemeKind.Rings)
         };
 
         _themes.EnsureStarterThemes();
@@ -293,9 +295,8 @@ public partial class MainWindow : Window
         if (sender is not ToggleButton option) return;
 
         var variant = (option.Tag as string) == "dark" ? Skins.Dark : Skins.Light;
-        var family = Skins.IsOcean(_skin) ? "ocean" : "cream";
 
-        ApplySkin(Skins.Combine(family, variant));
+        ApplySkin(Skins.Combine(Skins.Family(_skin), variant));
         option.IsChecked = true;
         SaveSettings();
     }
@@ -304,7 +305,7 @@ public partial class MainWindow : Window
     {
         if (sender is not ToggleButton option) return;
 
-        var family = (option.Tag as string) == "ocean" ? "ocean" : "cream";
+        var family = option.Tag as string ?? "cream";
         var variant = Skins.Variant(_skin);
 
         ApplySkin(Skins.Combine(family, variant));
@@ -316,8 +317,12 @@ public partial class MainWindow : Window
     {
         if (PaletteCream is null || PaletteOcean is null) return;
 
-        PaletteCream.IsChecked = !Skins.IsOcean(_skin);
-        PaletteOcean.IsChecked = Skins.IsOcean(_skin);
+        var family = Skins.Family(_skin);
+
+        PaletteCream.IsChecked = family == "cream";
+        PaletteOcean.IsChecked = family == "ocean";
+        PaletteSakura.IsChecked = family == "sakura";
+        PaletteForest.IsChecked = family == "forest";
     }
 
     private void UpdateTitleBar()

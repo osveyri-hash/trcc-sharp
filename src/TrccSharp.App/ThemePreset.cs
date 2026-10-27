@@ -47,6 +47,8 @@ public sealed class ThemePreset : INotifyPropertyChanged
     {
         ThemeKind.Clock => Loc.T("tile.clock"),
         ThemeKind.Media => Loc.T("tile.media"),
+        ThemeKind.History => Loc.T("tile.history"),
+        ThemeKind.Rings => Loc.T("tile.rings"),
         ThemeKind.Minimal => Loc.T("tile.minimal"),
         ThemeKind.Test => Loc.T("tile.test"),
         _ => Loc.T("tile.monitor")

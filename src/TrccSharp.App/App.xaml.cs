@@ -86,7 +86,11 @@ public partial class App : Application
         Directory.CreateDirectory(directory);
 
         var sensors = new SensorReader().Read();
-        var themes = new[] { ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Media, ThemeKind.Minimal, ThemeKind.Test };
+        var themes = new[]
+        {
+            ThemeKind.Monitor, ThemeKind.Clock, ThemeKind.Media,
+            ThemeKind.Minimal, ThemeKind.History, ThemeKind.Rings, ThemeKind.Test
+        };
 
         foreach (var theme in themes)
         {
