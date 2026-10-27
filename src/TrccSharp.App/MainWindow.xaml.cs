@@ -58,6 +58,19 @@ public partial class MainWindow : Window
     private bool _dragging;
     private Point _dragOffset;
 
+    // Оформление кадра: шрифт, цвет текста и яркость фона.
+    private string _panelFont = "Segoe UI";
+    private string _panelInk = "";
+    private int _background = 100;
+
+    // Сдвиг и масштаб содержимого — свой для каждого вида.
+    private readonly Dictionary<ThemeKind, ViewTransform> _transforms = new();
+    private bool _syncingScale;
+    private bool _movingView;
+    private Point _moveStart;
+    private double _moveFromX;
+    private double _moveFromY;
+
     // Тема самого окна: светлая или тёмная.
     private string _skin = Skins.Light;
 
@@ -205,6 +218,21 @@ public partial class MainWindow : Window
         _widgets.AddRange(_settings.Layout);
         PublishWidgets();
 
+        // Оформление кадра: шрифт, цвет текста, яркость фона и сдвиги видов.
+        _panelFont = string.IsNullOrWhiteSpace(_settings.PanelFont) ? "Segoe UI" : _settings.PanelFont;
+        ThemeRenderer.FontName = _panelFont;
+
+        _panelInk = _settings.PanelInk ?? "";
+        _background = _settings.Background is >= 20 and <= 200 ? _settings.Background : 100;
+        ThemeRenderer.BackgroundBrightness = _background / 100.0;
+        ApplyInk();
+
+        foreach (var pair in _settings.Transforms)
+        {
+            if (Enum.TryParse<ThemeKind>(pair.Key, true, out var kind) && pair.Value is not null)
+                _transforms[kind] = pair.Value.Clone();
+        }
+
         // Командная строка главнее сохранённого: --fps N, --media <файл>, --brightness N.
         var fpsIndex = Array.FindIndex(args, a => a.Equals("--fps", StringComparison.OrdinalIgnoreCase));
         if (fpsIndex >= 0 && fpsIndex + 1 < args.Length && double.TryParse(args[fpsIndex + 1], out var fpsValue))
@@ -227,6 +255,12 @@ public partial class MainWindow : Window
         SetStatus("status.off");
         UpdateToggleLabel();
         RefreshMediaText();
+
+        FillFonts();
+        UpdateInkButtons();
+        if (BackgroundSlider is not null) BackgroundSlider.Value = _background;
+        ApplyViewTransform();
+
         RenderFrame();
 
         // Настройки восстановлены — только теперь можно их сохранять.
@@ -453,10 +487,11 @@ public partial class MainWindow : Window
         if (_monitorView == ThemeKind.Custom) EnsureStarterLayout();
 
         UpdateViewButtons();
+        UpdateWidgetSelection();
+        ApplyViewTransform();
         _frameDirty = true;
 
         if (!apply) return;
-
         SaveSettings();
         if (IsLoaded) RenderFrame();
     }
@@ -552,6 +587,10 @@ public partial class MainWindow : Window
         AnimateLabelColumn(AccentLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(CaptionLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(LayoutLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(FontLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(InkLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(BackgroundLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(ScaleLabelColumn, targetLabelWidth, duration, easing);
 
         foreach (var label in labels)
         {
@@ -590,6 +629,10 @@ public partial class MainWindow : Window
         if (AccentLabelColumn is not null) AccentLabelColumn.Width = value;
         if (CaptionLabelColumn is not null) CaptionLabelColumn.Width = value;
         if (LayoutLabelColumn is not null) LayoutLabelColumn.Width = value;
+        if (FontLabelColumn is not null) FontLabelColumn.Width = value;
+        if (InkLabelColumn is not null) InkLabelColumn.Width = value;
+        if (BackgroundLabelColumn is not null) BackgroundLabelColumn.Width = value;
+        if (ScaleLabelColumn is not null) ScaleLabelColumn.Width = value;
     }
 
     private static void AnimateColumn(ColumnDefinition? column, double to, TimeSpan duration, IEasingFunction easing)
@@ -613,6 +656,7 @@ public partial class MainWindow : Window
         SectionTheme, RowPaletteLabel, RowWindowLabel, RowPanelLabel, RowViewLabel, RowAutoStartLabel,
         RowAutoOutputLabel,
         SectionCustom, RowAccentLabel, RowCaptionLabel, RowLayoutLabel,
+        RowFontLabel, RowInkLabel, RowBackgroundLabel, RowScaleLabel,
         SectionMedia, MediaText, RecentLabel,
         SectionMyThemes, ThemesHint
     };
@@ -785,6 +829,7 @@ public partial class MainWindow : Window
         UpdateViewButtons();
         UpdatePanelButtons();
         UpdateWidgetSelection();
+        ApplyViewTransform();
         PlaceGlass(animate: IsLoaded && _glassPlaced, target: selectedTile);
         ApplyBackdrop();
         UpdateMediaSection();
@@ -959,6 +1004,8 @@ public partial class MainWindow : Window
 
         SetAccent(ThemePreset.ToColor(dot.Tag as string));
         UpdateAccentButtons();
+        ApplyInk();
+        UpdateInkButtons();
         SaveSettings();
 
         if (IsLoaded) RenderFrame();
@@ -1106,9 +1153,19 @@ public partial class MainWindow : Window
     // потому что картинка живёт в своей сетке и растягивается вьюбоксом.
     private void OnPreviewMouseDown(object sender, MouseButtonEventArgs e)
     {
-        if (RenderKind() != ThemeKind.Custom) return;
-
         var point = e.GetPosition(Preview);
+
+        if (RenderKind() != ThemeKind.Custom)
+        {
+            // В готовых видах тащим всё содержимое кадра: рамка остаётся на месте.
+            _movingView = true;
+            _moveStart = point;
+            _moveFromX = CurrentTransform().X;
+            _moveFromY = CurrentTransform().Y;
+            Preview.CaptureMouse();
+            return;
+        }
+
         _selectedWidget = null;
 
         for (var i = _widgets.Count - 1; i >= 0; i--)
@@ -1129,13 +1186,30 @@ public partial class MainWindow : Window
 
     private void OnPreviewMouseMove(object sender, MouseEventArgs e)
     {
-        if (!_dragging || _selectedWidget is not { } widget || e.LeftButton != MouseButtonState.Pressed)
+        if (e.LeftButton != MouseButtonState.Pressed)
+        {
+            _movingView = false;
+            _dragging = false;
             return;
+        }
 
-        var point = e.GetPosition(Preview);
+        if (_movingView)
+        {
+            var point = e.GetPosition(Preview);
+            var transform = CurrentTransform();
 
-        widget.X = Math.Clamp(point.X - _dragOffset.X, 0, ThemeRenderer.Width - ThemeRenderer.WidgetWidth);
-        widget.Y = Math.Clamp(point.Y - _dragOffset.Y, 0, ThemeRenderer.Height - ThemeRenderer.WidgetHeight);
+            transform.X = _moveFromX + (point.X - _moveStart.X);
+            transform.Y = _moveFromY + (point.Y - _moveStart.Y);
+            StoreTransform(transform);
+            return;
+        }
+
+        if (!_dragging || _selectedWidget is not { } widget) return;
+
+        var position = e.GetPosition(Preview);
+
+        widget.X = Math.Clamp(position.X - _dragOffset.X, 0, ThemeRenderer.Width - ThemeRenderer.WidgetWidth);
+        widget.Y = Math.Clamp(position.Y - _dragOffset.Y, 0, ThemeRenderer.Height - ThemeRenderer.WidgetHeight);
 
         PublishWidgets();
         UpdateWidgetSelection();
@@ -1150,11 +1224,139 @@ public partial class MainWindow : Window
 
     private void EndDrag()
     {
-        if (!_dragging) return;
+        if (!_dragging && !_movingView) return;
 
         _dragging = false;
+        _movingView = false;
         Preview.ReleaseMouseCapture();
         SaveSettings();
+    }
+
+    // ── Оформление кадра: шрифт, цвет, фон, сдвиг вида ─────────────────────
+
+    private void FillFonts()
+    {
+        if (FontPicker is null) return;
+
+        var names = Fonts.SystemFontFamilies
+            .Select(family => family.Source)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)
+            .ToList();
+
+        FontPicker.ItemsSource = names;
+        FontPicker.SelectedItem =
+            names.FirstOrDefault(n => string.Equals(n, _panelFont, StringComparison.OrdinalIgnoreCase))
+            ?? names.FirstOrDefault();
+    }
+
+    /// <summary>Цвет текста кадра: тушь темы, белый, серый или акцент.</summary>
+    private void ApplyInk()
+    {
+        ThemeRenderer.InkColor = _panelInk switch
+        {
+            "light" => Colors.White,
+            "grey" => Color.FromRgb(0x9A, 0xA0, 0xA6),
+            "accent" => _accent,
+            _ => null
+        };
+
+        if (InkAccentDot is not null)
+            InkAccentDot.Background = new SolidColorBrush(_accent);
+
+        _frameDirty = true;
+    }
+
+    private void UpdateInkButtons()
+    {
+        if (InkDefault is null) return;
+
+        InkDefault.IsChecked = _panelInk.Length == 0;
+        InkLight.IsChecked = _panelInk == "light";
+        InkGrey.IsChecked = _panelInk == "grey";
+        InkAccentDot.IsChecked = _panelInk == "accent";
+    }
+
+    private void OnFontChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loading || FontPicker.SelectedItem is not string family) return;
+
+        _panelFont = family;
+        ThemeRenderer.FontName = family;
+        _frameDirty = true;
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private void OnInkClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleButton dot) return;
+
+        _panelInk = dot.Tag as string ?? "";
+        ApplyInk();
+        UpdateInkButtons();
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private void OnBackgroundChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_loading) return;
+
+        _background = (int)Math.Round(e.NewValue);
+        ThemeRenderer.BackgroundBrightness = _background / 100.0;
+        _frameDirty = true;
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private void OnScaleChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (_loading || _syncingScale) return;
+
+        var transform = CurrentTransform();
+        transform.Scale = e.NewValue / 100.0;
+        StoreTransform(transform);
+    }
+
+    private void OnResetViewClick(object sender, RoutedEventArgs e)
+    {
+        _transforms.Remove(RenderKind());
+        ApplyViewTransform();
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    private ViewTransform CurrentTransform() =>
+        _transforms.TryGetValue(RenderKind(), out var transform) ? transform : new ViewTransform();
+
+    private void StoreTransform(ViewTransform transform)
+    {
+        if (transform.IsIdentity) _transforms.Remove(RenderKind());
+        else _transforms[RenderKind()] = transform;
+
+        ThemeRenderer.Transform = transform;
+        _frameDirty = true;
+        SaveSettings();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    /// <summary>Подтягивает сдвиг вида: свой у каждого вида, свой и ползунок масштаба.</summary>
+    private void ApplyViewTransform()
+    {
+        var transform = CurrentTransform();
+        ThemeRenderer.Transform = transform;
+
+        if (ScaleSlider is null) return;
+
+        _syncingScale = true;
+        ScaleSlider.Value = Math.Clamp(transform.Scale * 100, ScaleSlider.Minimum, ScaleSlider.Maximum);
+        _syncingScale = false;
     }
 
     // ── Частота и яркость ───────────────────────────────────────────────────
@@ -1231,6 +1433,10 @@ public partial class MainWindow : Window
         _settings.Accent = ThemePreset.ToHex(_accent);
         _settings.Caption = _caption;
         _settings.Layout = _widgets.Select(widget => widget.Clone()).ToList();
+        _settings.PanelFont = _panelFont;
+        _settings.PanelInk = _panelInk;
+        _settings.Background = _background;
+        _settings.Transforms = _transforms.ToDictionary(pair => pair.Key.ToString(), pair => pair.Value.Clone());
         _settings.UiTheme = _skin;
         _settings.PanelDark = _panelDark;
         _settings.Compact = _compact;
@@ -1333,6 +1539,8 @@ public partial class MainWindow : Window
 
             SetAccent(ThemePreset.ToColor(preset.Accent));
             UpdateAccentButtons();
+            ApplyInk();
+            UpdateInkButtons();
             PresetNameBox.Text = preset.Name;
 
             _panelDark = preset.Dark;

@@ -26,6 +26,18 @@ public sealed class Settings
     /// <summary>Своя раскладка панели: объекты, которые двигаются по превью.</summary>
     public List<PanelWidget> Layout { get; set; } = new();
 
+    /// <summary>Шрифт кадра: имя семейства; пусто — Segoe UI.</summary>
+    public string? PanelFont { get; set; }
+
+    /// <summary>Цвет текста кадра: пусто — тушь темы, light, grey или accent.</summary>
+    public string? PanelInk { get; set; }
+
+    /// <summary>Яркость фона кадра, 20–200 %: 100 — как есть, выше — светлее.</summary>
+    public int Background { get; set; } = 100;
+
+    /// <summary>Сдвиг и масштаб содержимого — свой для каждого вида.</summary>
+    public Dictionary<string, ViewTransform> Transforms { get; set; } = new();
+
     /// <summary>Тема окна: "light" (бумага) или "dark" (тушь).</summary>
     public string? UiTheme { get; set; }
 
@@ -66,6 +78,7 @@ public sealed class Settings
                 {
                     settings.RecentMedia ??= new List<string>();
                     settings.Layout ??= new List<PanelWidget>();
+                    settings.Transforms ??= new Dictionary<string, ViewTransform>();
                     return settings;
                 }
             }

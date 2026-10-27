@@ -266,6 +266,88 @@
             </Setter>
         </Style>
 
+        <!-- Выбор шрифта кадра -->
+        <Style x:Key="FontPicker" TargetType="ComboBox">
+            <Setter Property="Height" Value="28" />
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+            <Setter Property="Background" Value="{DynamicResource Surface}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource Rule}" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{Binding Background, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderBrush="{Binding BorderBrush, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                BorderThickness="1" CornerRadius="9">
+                                            <Grid>
+                                                <ContentPresenter Margin="10,0,28,0" VerticalAlignment="Center"
+                                                                  Content="{Binding SelectionBoxItem, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                                                  ContentTemplate="{Binding SelectionBoxItemTemplate, RelativeSource={RelativeSource AncestorType=ComboBox}}" />
+                                                <Path HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Margin="0,0,10,0" Data="M 0 0 L 8 0 L 4 5 Z"
+                                                      Fill="{DynamicResource Grey}" />
+                                            </Grid>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+
+                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
+                                   AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Rule}"
+                                        BorderThickness="1" CornerRadius="9" Margin="0,4,0,0" MaxHeight="260"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ScrollViewer>
+                                        <ItemsPresenter />
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Padding" Value="10,6" />
+                        <Setter Property="FontSize" Value="11" />
+                        <Setter Property="Foreground" Value="{DynamicResource Ink}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ComboBoxItem">
+                                    <Border x:Name="Row" Background="Transparent" CornerRadius="6"
+                                            Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsHighlighted" Value="True">
+                                            <Setter TargetName="Row" Property="Background" Value="{DynamicResource Wash}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+
+            <!-- Имя шрифта набрано им самим: список сразу показывает, как будет выглядеть -->
+            <Setter Property="ItemTemplate">
+                <Setter.Value>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding}" FontFamily="{Binding}" FontSize="13"
+                                   Foreground="{DynamicResource Ink}" />
+                    </DataTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Кнопка-контур -->
         <Style x:Key="Ghost" TargetType="Button">
             <Setter Property="Foreground" Value="{DynamicResource Ink}" />
@@ -745,7 +827,7 @@
 
                         <Border Height="1" Background="{DynamicResource Rule}" Margin="0,16,0,14" />
 
-                        <!-- СВОЁ: акцент кадра и собственная подпись -->
+                        <!-- Своё: акцент кадра и собственная подпись -->
                         <TextBlock x:Name="SectionCustom"
                                    Text="{Binding [section.custom], Source={x:Static app:Loc.Instance}}"
                                    Style="{StaticResource Section}" />
@@ -834,6 +916,74 @@
 
                         <TextBlock Style="{StaticResource Hint}" Margin="0,7,0,0"
                                    Text="{Binding [custom.hint], Source={x:Static app:Loc.Instance}}" />
+
+                        <Grid Margin="0,12,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="FontLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowFontLabel"
+                                       Text="{Binding [custom.font], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <ComboBox x:Name="FontPicker" Grid.Column="1" Style="{StaticResource FontPicker}"
+                                      SelectionChanged="OnFontChanged" />
+                        </Grid>
+
+                        <Grid Margin="0,9,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="InkLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowInkLabel"
+                                       Text="{Binding [custom.color], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ToggleButton x:Name="InkDefault" Style="{StaticResource AccentDot}"
+                                              Background="#101012" Tag="" Click="OnInkClick"
+                                              ToolTip="{Binding [ink.default], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="InkLight" Style="{StaticResource AccentDot}"
+                                              Background="#FFFFFF" Tag="light" Click="OnInkClick"
+                                              ToolTip="{Binding [ink.light], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="InkGrey" Style="{StaticResource AccentDot}"
+                                              Background="#9AA0A6" Tag="grey" Click="OnInkClick"
+                                              ToolTip="{Binding [ink.grey], Source={x:Static app:Loc.Instance}}" />
+                                <ToggleButton x:Name="InkAccentDot" Style="{StaticResource AccentDot}"
+                                              Background="#D98F96" Tag="accent" Margin="0" Click="OnInkClick"
+                                              ToolTip="{Binding [ink.accent], Source={x:Static app:Loc.Instance}}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="BackgroundLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowBackgroundLabel"
+                                       Text="{Binding [custom.background], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <Slider x:Name="BackgroundSlider" Grid.Column="1" Style="{StaticResource InkSlider}"
+                                    Minimum="20" Maximum="200" Value="100" TickFrequency="10" IsSnapToTickEnabled="True"
+                                    ToolTip="{Binding [custom.background], Source={x:Static app:Loc.Instance}}"
+                                    ValueChanged="OnBackgroundChanged" />
+                        </Grid>
+
+                        <Grid Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="ScaleLabelColumn" Width="64" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock x:Name="RowScaleLabel"
+                                       Text="{Binding [custom.scale], Source={x:Static app:Loc.Instance}}"
+                                       FontSize="10" Foreground="{DynamicResource Grey}" VerticalAlignment="Center" />
+                            <Slider x:Name="ScaleSlider" Grid.Column="1" Style="{StaticResource InkSlider}"
+                                    Minimum="60" Maximum="160" Value="100" TickFrequency="5" IsSnapToTickEnabled="True"
+                                    ToolTip="{Binding [custom.scale], Source={x:Static app:Loc.Instance}}"
+                                    ValueChanged="OnScaleChanged" />
+                            <Button x:Name="ResetViewButton" Grid.Column="2" Style="{StaticResource Ghost}" Margin="8,0,0,0"
+                                    Click="OnResetViewClick"
+                                    Content="{Binding [custom.reset], Source={x:Static app:Loc.Instance}}" />
+                        </Grid>
 
                         <Border Height="1" Background="{DynamicResource Rule}" Margin="0,16,0,14" />
 

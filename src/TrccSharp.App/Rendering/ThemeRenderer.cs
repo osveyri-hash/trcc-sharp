@@ -55,11 +55,30 @@ public static class ThemeRenderer
 
     private static readonly CultureInfo Culture = CultureInfo.GetCultureInfo("ru-RU");
 
-    private static readonly Typeface Thin =
-        new(new FontFamily("Segoe UI Light"), FontStyles.Normal, FontWeights.Light, FontStretches.Normal);
-    private static readonly Typeface Regular = new("Segoe UI");
+    // Шрифт кадра выбирается в окне; иероглифы всегда остаются японскими.
+    private static string _fontName = "Segoe UI";
+    private static Typeface Thin = BuildTypeface(FontWeights.Light);
+    private static Typeface Regular = BuildTypeface(FontWeights.Normal);
     private static readonly Typeface Jp =
         new(new FontFamily("Yu Gothic UI"), FontStyles.Normal, FontWeights.Light, FontStretches.Normal);
+
+    /// <summary>Семейство шрифта кадра; смена пересобирает оба начертания.</summary>
+    public static string FontName
+    {
+        get => _fontName;
+        set
+        {
+            var name = string.IsNullOrWhiteSpace(value) ? "Segoe UI" : value.Trim();
+            if (string.Equals(name, _fontName, StringComparison.OrdinalIgnoreCase)) return;
+
+            _fontName = name;
+            Thin = BuildTypeface(FontWeights.Light);
+            Regular = BuildTypeface(FontWeights.Normal);
+        }
+    }
+
+    private static Typeface BuildTypeface(FontWeight weight) =>
+        new(new FontFamily(_fontName), FontStyles.Normal, weight, FontStretches.Normal);
 
     // Две палитры: бумага с тушью и чёрная доска с белой тушью.
     private static readonly Brush PaperLight = Freeze(new SolidColorBrush(Color.FromRgb(0xF5, 0xF3, 0xEE)));
@@ -104,6 +123,45 @@ public static class ThemeRenderer
     private static Color _accentColor = DefaultAccent;
     private static Brush _accentBrush = Ink;
 
+    /// <summary>Цвет текста кадра: null — тушь выбранной палитры.</summary>
+    public static Color? InkColor { get; set; }
+
+    /// <summary>Яркость фона 0.2…2: ниже 1 подложка темнеет, выше — светлеет.</summary>
+    public static double BackgroundBrightness { get; set; } = 1;
+
+    /// <summary>Сдвиг и масштаб содержимого вида; у «Своего» не применяется.</summary>
+    public static ViewTransform Transform { get; set; } = new();
+
+    /// <summary>Плёнка поверх фона: темнее единицы — чёрная, светлее — белая.</summary>
+    private static Brush? ShadeBrush
+    {
+        get
+        {
+            var level = Math.Clamp(BackgroundBrightness, 0.2, 2);
+
+            if (level < 0.999)
+                return Freeze(new SolidColorBrush(Color.FromArgb((byte)Math.Round(255 * (1 - level)), 0, 0, 0)));
+
+            if (level > 1.001)
+            {
+                var alpha = (byte)Math.Round(255 * Math.Min(1, level - 1));
+                return Freeze(new SolidColorBrush(Color.FromArgb(alpha, 255, 255, 255)));
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>Свой цвет текста: тушь, подписи и тихие линии едут за ним.</summary>
+    private static void ApplyInk()
+    {
+        if (InkColor is not { } color) return;
+
+        Ink = Freeze(new SolidColorBrush(color));
+        Grey = Freeze(new SolidColorBrush(color) { Opacity = 0.62 });
+        Faint = Freeze(new SolidColorBrush(color) { Opacity = 0.4 });
+    }
+
     // Холст, буферы пикселей и визуал переиспользуются: за секунду их создавалось
     // до десяти штук по 300 КБ. Буферов два (пинг-понг), чтобы кадр, который уже
     // ушёл в отправку, не переписывался следующим.
@@ -140,6 +198,7 @@ public static class ThemeRenderer
         // Чёрная панель: та же раскладка, но тушь светлая, а бумага — доска.
         UsePalette(dark);
         EnsureAccent(ReadableAccent(accent ?? DefaultAccent));
+        ApplyInk();
         var text = string.IsNullOrWhiteSpace(caption) ? null : caption.Trim();
 
         // Медиа рисует свой кадр целиком — подпись накладываем поверх.
@@ -164,6 +223,24 @@ public static class ThemeRenderer
             }
 
             dc.DrawRectangle(null, RulePen, new Rect(8.5, 8.5, Width - 17, Height - 17));
+
+            // Яркость фона: затемняем или подсвечиваем подложку и фото, текст не трогаем.
+            if (ShadeBrush is { } shade)
+                dc.DrawRectangle(shade, null, new Rect(0, 0, Width, Height));
+
+            // Сдвиг и масштаб содержимого вида: рамка остаётся на месте.
+            var transform = theme == ThemeKind.Custom ? null : Transform;
+            var moved = transform is { IsIdentity: false };
+
+            dc.PushClip(new RectangleGeometry(new Rect(0, 0, Width, Height)));
+
+            if (moved && transform is { } t)
+            {
+                var group = new TransformGroup();
+                group.Children.Add(new ScaleTransform(t.Scale, t.Scale, Width / 2.0, Height / 2.0));
+                group.Children.Add(new TranslateTransform(t.X, t.Y));
+                dc.PushTransform(group);
+            }
 
             switch (theme)
             {
@@ -210,6 +287,9 @@ public static class ThemeRenderer
                     DrawMediaHint(dc, text);
                     break;
             }
+
+            if (moved) dc.Pop();
+            dc.Pop();
         }
 
         // RenderTargetBitmap умеет только Pbgra32; фон непрозрачный,
