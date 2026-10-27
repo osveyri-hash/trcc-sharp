@@ -3,6 +3,7 @@ bin/
 obj/
 dist/
 dist-installer/
+dist-lite/
 *.user
 *.suo
 .vs/
