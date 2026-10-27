@@ -13,8 +13,16 @@
 !define RUNKEY     "Software\Microsoft\Windows\CurrentVersion\Run"
 !define GITHUB     "https://github.com/osveyri-hash/trcc-sharp"
 
+!ifdef LITE
+    !define APPSRC "..\dist-lite\TrccSharp.exe"
+    !define SUFFIX "-lite"
+!else
+    !define APPSRC "..\dist\TrccSharp.exe"
+    !define SUFFIX ""
+!endif
+
 Name "${APPNAME} ${VERSION}"
-OutFile "..\dist-installer\TrccSharp-${VERSION}-setup.exe"
+OutFile "..\dist-installer\TrccSharp${SUFFIX}-${VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\${APPNAME}"
 InstallDirRegKey HKCU "${APPKEY}" "InstallDir"
 RequestExecutionLevel user
@@ -61,7 +69,7 @@ Section "TrccSharp" SEC_MAIN
     Sleep 500
 
     SetOutPath "$INSTDIR"
-    File "..\dist\${APPEXE}"
+    File "${APPSRC}"
     File "..\src\TrccSharp.App\assets\${APPICON}"
     File "..\README.md"
 
