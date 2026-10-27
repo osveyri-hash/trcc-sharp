@@ -1,0 +1,67 @@
+<Window x:Class="TrccSharp.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TrccSharp — экран СЖО" Height="700" Width="980"
+        Background="#0E1015" WindowStartupLocation="CenterScreen"
+        AllowDrop="True" Drop="OnDropFile" DragOver="OnDragOver">
+
+    <Grid Margin="18">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="340" />
+            <ColumnDefinition Width="*" />
+        </Grid.ColumnDefinitions>
+
+        <StackPanel Grid.Column="0" Margin="0,0,18,0">
+            <TextBlock Text="TrccSharp" FontSize="26" FontWeight="SemiBold" Foreground="#F2F4F8" />
+            <TextBlock Text="альтернатива TRCC для LCD Thermalright"
+                       Foreground="#8A93A6" Margin="0,4,0,14" TextWrapping="Wrap" />
+
+            <TextBlock Text="Тема" Foreground="#8A93A6" Margin="0,0,0,6" />
+            <ComboBox x:Name="ThemeBox" SelectionChanged="OnThemeChanged" Padding="8" />
+
+            <Button x:Name="MediaButton" Content="Выбрать гифку, фото или видео…"
+                    Click="OnPickMediaClick" Margin="0,10,0,0" Padding="10,8"
+                    BorderThickness="0" Background="#232731" Foreground="#E6E9F0" />
+            <TextBlock x:Name="MediaText" Text="медиа не выбрано" Foreground="#8A93A6"
+                       FontSize="12" Margin="0,6,0,0" TextWrapping="Wrap" />
+
+            <TextBlock Text="Кадров в секунду" Foreground="#8A93A6" Margin="0,14,0,6" />
+            <Slider x:Name="FpsSlider" Minimum="1" Maximum="10" Value="2"
+                    TickFrequency="1" IsSnapToTickEnabled="True"
+                    ValueChanged="OnFpsChanged" />
+            <TextBlock x:Name="FpsLabel" Text="2 кадр/с" Foreground="#8A93A6"
+                       FontSize="12" Margin="0,4,0,0" />
+
+            <TextBlock Text="Яркость экрана" Foreground="#8A93A6" Margin="0,12,0,6" />
+            <Slider x:Name="BrightnessSlider" Minimum="10" Maximum="100" Value="100"
+                    TickFrequency="5" IsSnapToTickEnabled="True"
+                    ValueChanged="OnBrightnessChanged" />
+            <TextBlock x:Name="BrightnessLabel" Text="100 %" Foreground="#8A93A6"
+                       FontSize="12" Margin="0,4,0,0" />
+
+            <Button x:Name="ToggleButton" Content="Запустить вывод" Click="OnToggleClick"
+                    Margin="0,16,0,0" Padding="14,10" FontSize="15" BorderThickness="0"
+                    Background="#FF8A2B" Foreground="#14161C" />
+
+            <TextBlock x:Name="StatusText" Text="Не подключено" Foreground="#E6E9F0"
+                       Margin="0,16,0,0" TextWrapping="Wrap" />
+
+            <TextBlock x:Name="InfoText" Foreground="#8A93A6" Margin="0,8,0,0"
+                       TextWrapping="Wrap" FontFamily="Consolas" FontSize="12" />
+
+            <TextBlock x:Name="LogText" Foreground="#6E7889" Margin="0,12,0,0"
+                       TextWrapping="Wrap" FontSize="12" />
+        </StackPanel>
+
+        <Border Grid.Column="1" Background="#05070A" CornerRadius="8" Padding="12">
+            <Grid>
+                <Image x:Name="Preview" Stretch="Uniform"
+                       RenderOptions.BitmapScalingMode="NearestNeighbor" />
+                <!-- Затемнение превью повторяет яркость панели, не трогая сам кадр -->
+                <Rectangle x:Name="PreviewDim" Fill="Black" Opacity="0" IsHitTestVisible="False" />
+                <TextBlock x:Name="PreviewHint" Text="320 × 240" HorizontalAlignment="Right"
+                           VerticalAlignment="Bottom" Foreground="#4A5261" FontSize="11" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>
