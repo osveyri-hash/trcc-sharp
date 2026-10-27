@@ -364,11 +364,6 @@
                                 Padding="{TemplateBinding Padding}">
                             <ContentPresenter VerticalAlignment="Center" />
                         </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Row" Property="Background" Value="{DynamicResource Wash}" />
-                            </Trigger>
-                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -669,17 +664,31 @@
                                       Opacity="0.35" Color="#000000" />
                 </Border.Effect>
                 <Grid>
-                    <Canvas x:Name="AddMenuGlassLayer" IsHitTestVisible="False">
-                        <Border x:Name="AddMenuGlass" CornerRadius="9" Visibility="Collapsed"
-                                Background="{DynamicResource Wash}"
-                                BorderBrush="{DynamicResource Rose}" BorderThickness="1">
+                    <Canvas x:Name="AddMenuGlassLayer" IsHitTestVisible="False" ClipToBounds="False">
+                        <!-- Жидкое стекло: переезжает к пункту под курсором и слегка вытягивается -->
+                        <Border x:Name="AddMenuGlass" CornerRadius="8" Visibility="Collapsed"
+                                BorderBrush="{DynamicResource Rose}" BorderThickness="1"
+                                Opacity="0" RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform x:Name="AddMenuGlassScale" ScaleX="1" ScaleY="1" />
+                            </Border.RenderTransform>
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Color="#4DFFFFFF" Offset="0" />
+                                    <GradientStop Color="#26FFFFFF" Offset="0.45" />
+                                    <GradientStop Color="#0DFFFFFF" Offset="1" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                            <!-- Блик по верхней кромке — читается как стекло -->
+                            <Border Height="1" VerticalAlignment="Top" Margin="7,0,7,0"
+                                    CornerRadius="1" Background="#8CFFFFFF" />
                             <Border.Effect>
-                                <DropShadowEffect BlurRadius="10" ShadowDepth="1" Direction="270"
-                                                  Opacity="0.25" Color="#000000" />
+                                <DropShadowEffect x:Name="AddMenuGlassGlow" BlurRadius="14" ShadowDepth="0"
+                                                  Opacity="0.45" Color="#FFD98F96" />
                             </Border.Effect>
                         </Border>
                     </Canvas>
-                <StackPanel>
+                <StackPanel x:Name="AddMenuList" MouseLeave="OnAddMenuLeave">
                     <Button Style="{StaticResource MenuButton}" MouseEnter="OnAddMenuHover" Tag="cpu" Click="OnAddWidgetType"
                             Content="{Binding [widget.cpu], Source={x:Static app:Loc.Instance}}" />
                     <Button Style="{StaticResource MenuButton}" MouseEnter="OnAddMenuHover" Tag="ring" Click="OnAddWidgetType"

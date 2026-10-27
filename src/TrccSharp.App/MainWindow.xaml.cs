@@ -80,6 +80,9 @@ public partial class MainWindow : Window
     private bool _syncingText;
     private readonly Dictionary<PanelWidget, string?> _fontPreview = new();
 
+    // «Жидкое стекло» в меню добавления объектов.
+    private Button? _glassItem;
+
     // Своя палитра цвета: тон, насыщенность, яркость и что сейчас тянут.
     private double _hue;
     private double _saturation = 1;
@@ -158,6 +161,9 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // Меню закрылось (щелчок мимо) — стекло не должно остаться висеть.
+        AddMenuPopup.Closed += (_, _) => ResetAddMenuGlass();
 
         _saveDelay.Tick += (_, _) =>
         {
@@ -827,6 +833,8 @@ public partial class MainWindow : Window
         if (AddMenuPopup is null) return;
 
         // Меню появляется по центру окна, чуть выше середины.
+        ResetAddMenuGlass();
+
         AddMenuPopup.PlacementTarget = this;
         AddMenuPopup.Placement = PlacementMode.Center;
         AddMenuPopup.HorizontalOffset = 0;
@@ -837,32 +845,126 @@ public partial class MainWindow : Window
     /// <summary>Стекло в меню добавления переезжает к пункту под курсором.</summary>
     private void OnAddMenuHover(object sender, MouseEventArgs e)
     {
+        if (sender is Button item && item.ActualHeight > 0)
+            MoveAddMenuGlass(item);
+    }
+
+    /// <summary>Курсор ушёл с меню — стекло растворяется, а не висит на старом пункте.</summary>
+    private void OnAddMenuLeave(object sender, MouseEventArgs e)
+    {
+        _glassItem = null;
+
+        if (AddMenuGlass is null) return;
+
+        var fade = new DoubleAnimation(AddMenuGlass.Opacity, 0, TimeSpan.FromMilliseconds(120));
+
+        fade.Completed += (_, _) =>
+        {
+            if (_glassItem is null) AddMenuGlass.Visibility = Visibility.Collapsed;
+        };
+
+        AddMenuGlass.BeginAnimation(UIElement.OpacityProperty, fade);
+    }
+
+    /// <summary>Ставит стекло на пункт и даёт ему «каплю» — лёгкое вытягивание по ходу движения.</summary>
+    private void MoveAddMenuGlass(Button item)
+    {
         if (AddMenuGlass is null || AddMenuGlassLayer is null) return;
-        if (sender is not Button item) return;
+        if (ReferenceEquals(item, _glassItem)) return;
+
+        _glassItem = item;
 
         var point = item.TranslatePoint(new Point(0, 0), AddMenuGlassLayer);
 
+        // Небольшой отступ, чтобы свечение не обрезалось краем списка.
+        const double inset = 1;
+        var left = point.X + inset;
+        var top = point.Y + inset;
+        var width = Math.Max(4, item.ActualWidth - inset * 2);
+        var height = Math.Max(4, item.ActualHeight - inset * 2);
+
+        var first = AddMenuGlass.Visibility != Visibility.Visible;
+
+        AddMenuGlass.Width = width;
+        AddMenuGlass.Height = height;
         AddMenuGlass.Visibility = Visibility.Visible;
-        AddMenuGlass.Width = item.ActualWidth;
-        AddMenuGlass.Height = item.ActualHeight;
 
-        var from = Canvas.GetTop(AddMenuGlass);
-        var to = point.Y;
-
-        Canvas.SetLeft(AddMenuGlass, point.X);
-
-        if (double.IsNaN(from) || Math.Abs(from - to) < 0.5)
+        if (first)
         {
-            Canvas.SetTop(AddMenuGlass, to);
+            Canvas.SetLeft(AddMenuGlass, left);
+            Canvas.SetTop(AddMenuGlass, top);
+
+            AddMenuGlass.BeginAnimation(UIElement.OpacityProperty,
+                new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)));
+
+            PulseAddMenuGlass();
             return;
         }
 
-        var move = new DoubleAnimation(from, to, TimeSpan.FromMilliseconds(180))
+        var fromLeft = Canvas.GetLeft(AddMenuGlass);
+        var fromTop = Canvas.GetTop(AddMenuGlass);
+
+        if (double.IsNaN(fromLeft)) fromLeft = left;
+        if (double.IsNaN(fromTop)) fromTop = top;
+
+        var duration = TimeSpan.FromMilliseconds(190);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        AddMenuGlass.BeginAnimation(Canvas.LeftProperty,
+            new DoubleAnimation(fromLeft, left, duration) { EasingFunction = easing });
+
+        AddMenuGlass.BeginAnimation(Canvas.TopProperty,
+            new DoubleAnimation(fromTop, top, duration) { EasingFunction = easing });
+
+        // Прозрачность могла остаться на нуле после «растворения».
+        AddMenuGlass.BeginAnimation(UIElement.OpacityProperty,
+            new DoubleAnimation(AddMenuGlass.Opacity, 1, TimeSpan.FromMilliseconds(90)));
+
+        PulseAddMenuGlass();
+    }
+
+    /// <summary>Растяжение по вертикали при переезде: капля тянется и собирается обратно.</summary>
+    private void PulseAddMenuGlass()
+    {
+        if (AddMenuGlassScale is null) return;
+
+        var pulse = new DoubleAnimationUsingKeyFrames
         {
-            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            Duration = TimeSpan.FromMilliseconds(300)
         };
 
-        AddMenuGlass.BeginAnimation(Canvas.TopProperty, move);
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.16,
+            KeyTime.FromPercent(0.3), new CubicEase { EasingMode = EasingMode.EaseOut }));
+
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(0.97, KeyTime.FromPercent(0.72)));
+
+        pulse.KeyFrames.Add(new EasingDoubleKeyFrame(1.0, KeyTime.FromPercent(1.0)));
+
+        AddMenuGlassScale.BeginAnimation(ScaleTransform.ScaleYProperty, pulse);
+    }
+
+    /// <summary>Сбрасывает стекло: каждое открытие меню начинается с чистого листа.</summary>
+    private void ResetAddMenuGlass()
+    {
+        _glassItem = null;
+
+        if (AddMenuGlass is null) return;
+
+        AddMenuGlass.BeginAnimation(UIElement.OpacityProperty, null);
+        AddMenuGlass.BeginAnimation(Canvas.LeftProperty, null);
+        AddMenuGlass.BeginAnimation(Canvas.TopProperty, null);
+
+        AddMenuGlass.Opacity = 0;
+        AddMenuGlass.Visibility = Visibility.Collapsed;
+
+        if (AddMenuGlassScale is null) return;
+
+        AddMenuGlassScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+        AddMenuGlassScale.ScaleY = 1;
+
+        // Свечение подстраивается под палитру окна.
+        if (AddMenuGlassGlow is not null && TryFindResource("Rose") is SolidColorBrush rose)
+            AddMenuGlassGlow.Color = rose.Color;
     }
 
     private void OnAddWidgetType(object sender, RoutedEventArgs e)
