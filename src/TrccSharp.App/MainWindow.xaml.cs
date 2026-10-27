@@ -66,6 +66,10 @@ public partial class MainWindow : Window
     private bool _glassTracking;
     private DateTime _glassTrackUntil;
 
+    // Превью обновляется в один и тот же WriteableBitmap — без нового BitmapSource на кадр.
+    private WriteableBitmap? _previewBitmap;
+    private volatile bool _hiddenToTray;
+
     // Трей: закрытие окна не выключает экран СЖО.
     private TrayIcon? _tray;
     private bool _exiting;
@@ -88,7 +92,7 @@ public partial class MainWindow : Window
 
     // Частота: ползунок задаёт её для тем «Монитор», «Часы», «Минимал», «Тест».
     // В теме «Медиа» ритм берётся у самого файла, поэтому рабочая частота — отдельная.
-    private const int MaxMediaFps = 30;
+    private const int MaxMediaFps = 10;
     private int _sliderFps = 2;
     private volatile int _effectiveFps = 2;
     private double _measuredFps;
@@ -221,6 +225,7 @@ public partial class MainWindow : Window
             UpdateAutoOutputButtons();
             RefreshRecent();
             PlaceGlass(animate: false);
+            RenderFrame();
 
             // Автозапуск: окно не нужно, экран СЖО работает из трея.
             if (Startup.IsAutoStart) HideToTray();
@@ -1112,6 +1117,21 @@ public partial class MainWindow : Window
         {
             cycle.Restart();
 
+            // Остановлено и свёрнуто в трей — не рисуем и не дёргаем UI.
+            if (_device is null && _hiddenToTray)
+            {
+                try
+                {
+                    await Task.Delay(1000, token);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+
+                continue;
+            }
+
             // 1. Отрисовка — только в UI-потоке (WPF RenderTargetBitmap).
             try
             {
@@ -1220,7 +1240,21 @@ public partial class MainWindow : Window
             var frame = ThemeRenderer.Render(theme, _snapshot, _clip, _accent, null, _panelDark, _backdrop);
             Volatile.Write(ref _frame, frame);
 
-            Preview.Source = ToBitmapSource(frame);
+            if (IsVisible)
+            {
+                if (_previewBitmap is null
+                    || _previewBitmap.PixelWidth != frame.Width
+                    || _previewBitmap.PixelHeight != frame.Height)
+                {
+                    _previewBitmap = new WriteableBitmap(
+                        frame.Width, frame.Height, 96, 96, PixelFormats.Bgra32, null);
+                    Preview.Source = _previewBitmap;
+                }
+
+                _previewBitmap.WritePixels(
+                    new Int32Rect(0, 0, frame.Width, frame.Height),
+                    frame.Bgra, frame.Width * 4, 0);
+            }
 
             _frameStatic = theme == ThemeKind.Media && _clip is { IsStatic: true };
             _frameDirty = false;
@@ -1259,19 +1293,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private static BitmapSource ToBitmapSource(Surface surface)
-    {
-        var bitmap = BitmapSource.Create(
-            surface.Width, surface.Height, 96, 96,
-            PixelFormats.Bgra32, null,
-            surface.Bgra, surface.Width * 4);
-
-        bitmap.Freeze();
-        return bitmap;
-    }
-
     // ── Медиа ───────────────────────────────────────────────────────────────
-
     /// <summary>Загружает гифку, фото или видео и (по желанию) включает тему «Медиа».</summary>
     private void ApplyMedia(string path, bool switchTheme)
     {
@@ -1878,18 +1900,27 @@ public partial class MainWindow : Window
 
     private void HideToTray()
     {
+        _hiddenToTray = true;
         ShowInTaskbar = false;
         Opacity = 1;
         Hide();
+
+        // Свёрнутому приложению незачем держать рабочий набор окна.
+        MemoryTrim.Trim();
     }
 
     private void ShowFromTray()
     {
+        _hiddenToTray = false;
         ShowInTaskbar = true;
         Opacity = 1;
         Show();
         WindowState = WindowState.Normal;
         Activate();
+
+        // Пока окно было скрыто, превью не обновлялось — догоняем кадр.
+        _frameDirty = true;
+        RenderFrame();
     }
 
     private void ExitFromTray()

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Windows;
@@ -66,6 +67,16 @@ public partial class App : Application
         }
 
         base.OnStartup(e);
+
+        // Фоновая программа у панели: не соревнуемся с играми и рабочим столом за CPU.
+        try
+        {
+            Process.GetCurrentProcess().PriorityClass = ProcessPriorityClass.BelowNormal;
+        }
+        catch
+        {
+            // Политики системы могут запрещать смену приоритета.
+        }
 
         new MainWindow().Show();
     }
