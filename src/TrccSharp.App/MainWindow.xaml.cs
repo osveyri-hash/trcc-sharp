@@ -512,6 +512,7 @@ public partial class MainWindow : Window
         AnimateLabelColumn(BackgroundLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(TextBrightnessLabelColumn, targetLabelWidth, duration, easing);
         AnimateLabelColumn(ScaleLabelColumn, targetLabelWidth, duration, easing);
+        AnimateLabelColumn(LabelAlignCaptionColumn, targetLabelWidth, duration, easing);
 
         foreach (var label in labels)
         {
@@ -550,6 +551,7 @@ public partial class MainWindow : Window
         if (BackgroundLabelColumn is not null) BackgroundLabelColumn.Width = value;
         if (TextBrightnessLabelColumn is not null) TextBrightnessLabelColumn.Width = value;
         if (ScaleLabelColumn is not null) ScaleLabelColumn.Width = value;
+        if (LabelAlignCaptionColumn is not null) LabelAlignCaptionColumn.Width = value;
     }
 
     private static void AnimateColumn(ColumnDefinition? column, double to, TimeSpan duration, IEasingFunction easing)
@@ -573,6 +575,7 @@ public partial class MainWindow : Window
         RowAutoStartLabel, RowAutoOutputLabel,
         SectionCustom, RowLabelCaption, RowTextLabel,
         RowFontLabel, RowInkLabel, RowBackgroundLabel, RowTextBrightnessLabel, RowScaleLabel,
+        RowLabelAlign,
         SectionMedia, MediaText, RecentLabel,
         SectionMyThemes, ThemesHint
     };
@@ -987,6 +990,10 @@ public partial class MainWindow : Window
         TextRow.Visibility = text is null ? Visibility.Collapsed : Visibility.Visible;
         if (LabelRow is not null)
             LabelRow.Visibility = labelled is null ? Visibility.Collapsed : Visibility.Visible;
+        if (LabelAlignRow is not null)
+            LabelAlignRow.Visibility = labelled is null ? Visibility.Collapsed : Visibility.Visible;
+
+        if (labelled is not null) SyncLabelAlign(labelled.LabelAlign);
 
         if (text is not null)
         {
@@ -1001,6 +1008,37 @@ public partial class MainWindow : Window
             WidgetLabelBox.Text = labelled.Label ?? ThemeRenderer.LabelFor(_snapshot, labelled.Type);
             _syncingText = false;
         }
+    }
+
+    /// <summary>Положение подписи: слева, по центру числа или по его правому краю.</summary>
+    private void OnLabelAlignClick(object sender, RoutedEventArgs e)
+    {
+        if (_loading || _selection.Count == 0) return;
+
+        var align = (sender as FrameworkElement)?.Tag as string ?? "left";
+
+        foreach (var widget in _selection)
+            widget.LabelAlign = align;
+
+        SyncLabelAlign(align);
+
+        PublishWidgets();
+        _frameDirty = true;
+        SaveSettingsSoon();
+
+        if (IsLoaded) RenderFrame();
+    }
+
+    /// <summary>Показывает в переключателе текущее положение подписи.</summary>
+    private void SyncLabelAlign(string? align)
+    {
+        if (LabelAlignLeft is null) return;
+
+        var value = align is "center" or "right" ? align : "left";
+
+        LabelAlignLeft.IsChecked = value == "left";
+        LabelAlignCenter.IsChecked = value == "center";
+        LabelAlignRight.IsChecked = value == "right";
     }
 
     private void OnWidgetLabelChanged(object sender, TextChangedEventArgs e)

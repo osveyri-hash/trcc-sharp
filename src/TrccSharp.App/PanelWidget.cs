@@ -28,6 +28,12 @@ public sealed class PanelWidget
     /// <summary>Своя подпись объекта (ЦП, ОЗУ…); пусто — стандартная.</summary>
     public string? Label { get; set; }
 
+    /// <summary>
+    /// Где стоит подпись относительно числа: «left» — по левому краю объекта,
+    /// «center» — по центру числа, «right» — по правому краю числа.
+    /// </summary>
+    public string LabelAlign { get; set; } = "left";
+
     public PanelWidget Clone() => new()
     {
         Type = Type,
@@ -37,6 +43,7 @@ public sealed class PanelWidget
         Ink = Ink,
         Font = Font,
         Text = Text,
-        Label = Label
+        Label = Label,
+        LabelAlign = LabelAlign
     };
 }

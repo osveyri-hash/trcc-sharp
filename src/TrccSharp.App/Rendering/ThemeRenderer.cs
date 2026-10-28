@@ -873,15 +873,31 @@ public static class ThemeRenderer
         var regular = WidgetTypeface(widget.Font, FontWeights.Normal);
         var thin = WidgetTypeface(widget.Font, FontWeights.Light);
 
-        // Подпись привязана к левому краю объекта и не зависит от ширины числа:
-        // иначе при смене «5 %» → «10 %» слово уезжает вправо.
+        // Подпись можно поставить слева, по центру числа или по его правому краю.
+        // В любом случае она не зависит от того, сколько знаков в значении.
         var labelX = widget.X;
 
         if (label.Length > 0)
+        {
+            var valueWidth = MeasureText(value, 21 * scale, thin);
+            var labelWidth = MeasureTracked(label, 8.5 * scale, regular, 1.6);
+
+            labelX = AlignLabelX(widget, valueWidth, labelWidth);
+
             DrawTracked(dc, label, labelX, widget.Y, 8.5 * scale, soft, regular, 1.6);
+        }
 
         DrawText(dc, value, widget.X, widget.Y + 12 * scale, 21 * scale, ink, thin);
     }
+
+    /// <summary>Точка, с которой начинается подпись при выбранном выравнивании.</summary>
+    private static double AlignLabelX(PanelWidget widget, double valueWidth, double labelWidth) =>
+        widget.LabelAlign switch
+        {
+            "center" => widget.X + (valueWidth - labelWidth) / 2,
+            "right" => widget.X + valueWidth - labelWidth,
+            _ => widget.X
+        };
 
     /// <summary>Подпись и значение объекта: своя подпись важнее стандартной.</summary>
     private static (string Label, string Value) WidgetContent(SensorSnapshot sensors, PanelWidget widget)
@@ -1013,18 +1029,25 @@ public static class ThemeRenderer
         var (label, value) = WidgetContent(data, widget);
 
         var width = Math.Max(24, MeasureText(value, 21 * scale, thin));
+        var left = widget.X;
         var top = widget.Y + 12 * scale;
         var height = 21 * scale + 4;
 
         // Подпись есть — рамка захватывает и её строку.
         if (label.Length > 0)
         {
-            width = Math.Max(width, MeasureTracked(label, 8.5 * scale, regular, 1.6));
+            // Подпись сбоку тоже должна влезать в рамку: считаем её настоящий край.
+            var labelWidth = MeasureTracked(label, 8.5 * scale, regular, 1.6);
+            var labelX = AlignLabelX(widget, width, labelWidth);
+            var right = Math.Max(widget.X + width, labelX + labelWidth);
+
+            left = Math.Min(widget.X, labelX);
+            width = right - left;
             top = widget.Y;
             height += 12 * scale;
         }
 
-        return new Rect(widget.X, top, width + 4, height);
+        return new Rect(left, top, width + 4, height);
     }
 
     /// <summary>Сколько пустой строки сверху, если подписи нет: значение ниже якоря.</summary>
