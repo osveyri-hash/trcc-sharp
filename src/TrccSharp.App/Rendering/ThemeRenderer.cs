@@ -873,11 +873,9 @@ public static class ThemeRenderer
         var regular = WidgetTypeface(widget.Font, FontWeights.Normal);
         var thin = WidgetTypeface(widget.Font, FontWeights.Light);
 
-        var valueWidth = MeasureText(value, 21 * scale, thin);
-        var labelWidth = MeasureTracked(label, 8.5 * scale, regular, 1.6);
-
-        // Подпись стоит по центру над значением.
-        var labelX = widget.X + Math.Max(0, (valueWidth - labelWidth) / 2);
+        // Подпись привязана к левому краю объекта и не зависит от ширины числа:
+        // иначе при смене «5 %» → «10 %» слово уезжает вправо.
+        var labelX = widget.X;
 
         if (label.Length > 0)
             DrawTracked(dc, label, labelX, widget.Y, 8.5 * scale, soft, regular, 1.6);

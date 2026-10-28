@@ -1838,7 +1838,7 @@ public partial class MainWindow : Window
             if (_selection.Count == 0) return;
 
             foreach (var widget in _selection)
-                widget.Scale = e.NewValue / 100.0;
+                SetWidgetScale(widget, e.NewValue / 100.0);
 
             PublishWidgets();
             UpdateWidgetSelection();
@@ -1862,11 +1862,11 @@ public partial class MainWindow : Window
             if (_selection.Count > 0)
             {
                 foreach (var widget in _selection)
-                    widget.Scale = 1;
+                    SetWidgetScale(widget, 1);
             }
             else
             {
-                foreach (var item in _widgets) item.Scale = 1;
+                foreach (var item in _widgets) SetWidgetScale(item, 1);
             }
 
             PublishWidgets();
@@ -1885,10 +1885,32 @@ public partial class MainWindow : Window
         if (IsLoaded) RenderFrame();
     }
 
-    private ViewTransform CurrentTransform() =>
-        _transforms.TryGetValue(RenderKind(), out var transform) ? transform : new ViewTransform();
+    /// <summary>
+    /// Меняет размер объекта вокруг его центра: ползунок масштаба не тянет
+    /// объект вправо-вниз, а растит его в обе стороны от середины.
+    /// </summary>
+    private void SetWidgetScale(PanelWidget widget, double scale)
+    {
+        var before = ThemeRenderer.WidgetBounds(widget, _snapshot);
 
-    private void StoreTransform(ViewTransform transform)
+        widget.Scale = Math.Clamp(scale, 0.5, 3);
+
+        var after = ThemeRenderer.WidgetBounds(widget, _snapshot);
+
+        // Центр до и после — разницу отдаём координатам, центр остаётся на месте.
+        widget.X += (before.X + before.Width / 2) - (after.X + after.Width / 2);
+        widget.Y += (before.Y + before.Height / 2) - (after.Y + after.Height / 2);
+
+        // За кадр не выпускаем: тот же зажим, что и при перетаскивании.
+        var offset = ThemeRenderer.LabelOffset(widget);
+
+        widget.X = Math.Clamp(widget.X, 0, Math.Max(0, ThemeRenderer.Width - after.Width));
+        widget.Y = Math.Clamp(widget.Y, -offset,
+            Math.Max(-offset, ThemeRenderer.Height - after.Height));
+    }
+
+    private ViewTransform CurrentTransform() =>
+        _transforms.TryGetValue(RenderKind(), out var transform) ? transform : new ViewTransform();    private void StoreTransform(ViewTransform transform)
     {
         if (transform.IsIdentity) _transforms.Remove(RenderKind());
         else _transforms[RenderKind()] = transform;
@@ -2047,7 +2069,8 @@ public partial class MainWindow : Window
             Brightness = _brightness,
             Fps = _sliderFps,
             Accent = ThemePreset.ToHex(_accent),
-            Dark = _panelDark
+            Dark = _panelDark,
+            Widgets = _widgets.Select(widget => widget.Clone()).ToList()
         };
 
         _themes.Upsert(preset);
@@ -2128,6 +2151,20 @@ public partial class MainWindow : Window
             _panelDark = preset.Dark;
     
             SelectTheme(preset.ToKind(), apply: false);
+
+            // Тема возвращает не только фон: раскладку, размеры, шрифты и цвета объектов.
+            if (PanelLayouts.IsObjectView(preset.ToKind()) && preset.Widgets is { } saved)
+            {
+                var layout = saved.Select(widget => widget.Clone()).ToList();
+
+                _layouts[preset.ToKind()] = layout;
+                _widgets = layout;
+                _selection.Clear();
+
+                PublishWidgets();
+                ApplyViewTransform();
+                UpdateWidgetSelection();
+            }
         }
         finally
         {

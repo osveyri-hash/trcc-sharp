@@ -46,10 +46,23 @@ public static class ThemePreview
                 }
             }
 
-            var surface = ThemeRenderer.Render(kind, sensors, clip,
-                ThemePreset.ToColor(preset.Accent), null, preset.Dark);
+            // Миниатюра рисуется теми же объектами, что сохранены в теме.
+            var previous = ThemeRenderer.Widgets;
 
-            return ToBitmap(surface);
+            if (preset.Widgets is { Count: > 0 } widgets)
+                ThemeRenderer.Widgets = widgets;
+
+            try
+            {
+                var surface = ThemeRenderer.Render(kind, sensors, clip,
+                    ThemePreset.ToColor(preset.Accent), null, preset.Dark);
+
+                return ToBitmap(surface);
+            }
+            finally
+            {
+                ThemeRenderer.Widgets = previous;
+            }
         }
         catch
         {

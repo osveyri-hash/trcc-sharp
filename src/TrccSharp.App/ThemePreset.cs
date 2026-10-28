@@ -24,6 +24,12 @@ public sealed class ThemePreset : INotifyPropertyChanged
     /// <summary>Панель в чёрном варианте.</summary>
     public bool Dark { get; set; }
 
+    /// <summary>
+    /// Объекты панели на момент сохранения темы: положение, размер, шрифт,
+    /// цвет, подписи. Без этого тема возвращала фон, но не раскладку.
+    /// </summary>
+    public List<PanelWidget>? Widgets { get; set; }
+
     private ImageSource? _preview;
 
     /// <summary>Миниатюра темы для списка — тот же кадр, что уходит на панель.</summary>
@@ -118,7 +124,8 @@ public sealed class ThemePreset : INotifyPropertyChanged
         Brightness = Brightness,
         Fps = Fps,
         Accent = Accent,
-        Dark = Dark
+        Dark = Dark,
+        Widgets = Widgets?.Select(widget => widget.Clone()).ToList()
     };
 }
 

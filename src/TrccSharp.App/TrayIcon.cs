@@ -1,3 +1,4 @@
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
@@ -31,6 +32,7 @@ public sealed class TrayIcon : IDisposable
 
     private readonly HwndSource _window;
     private readonly IntPtr _icon;
+    private readonly bool _ownsIcon;
     private readonly ContextMenu _menu;
     private bool _disposed;
 
@@ -46,7 +48,7 @@ public sealed class TrayIcon : IDisposable
         _window = new HwndSource(0, 0, 0, 0, 0, "TrccSharpTray", IntPtr.Zero);
         _window.AddHook(WndProc);
 
-        _icon = LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+        _icon = LoadAppIcon(out _ownsIcon);
 
         _menu = new ContextMenu { Placement = PlacementMode.MousePoint };
         var open = new MenuItem { Header = openText };
@@ -110,12 +112,92 @@ public sealed class TrayIcon : IDisposable
     private static string Cut(string value, int max) =>
         value.Length <= max ? value : value[..max];
 
+    /// <summary>
+    /// Иконка трея — своя, из assets\TrccSharp.ico. Раньше здесь вызывался
+    /// системный IDI_APPLICATION, и в трее висел серый «лист бумаги».
+    /// </summary>
+    private static IntPtr LoadAppIcon(out bool owned)
+    {
+        owned = false;
+
+        try
+        {
+            var resource = Application.GetResourceStream(
+                new Uri("pack://application:,,,/assets/TrccSharp.ico"));
+
+            if (resource is null) return LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+
+            using var source = resource.Stream;
+            using var buffer = new MemoryStream();
+            source.CopyTo(buffer);
+
+            var bytes = buffer.ToArray();
+
+            // ICONDIR: 0 — reserved, 2 — тип (1 = иконка), 4 — число кадров.
+            if (bytes.Length < 6 || BitConverter.ToUInt16(bytes, 2) != 1)
+                return LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+
+            var frames = BitConverter.ToUInt16(bytes, 4);
+            var start = -1;
+            var length = 0;
+            var best = int.MaxValue;
+
+            for (var i = 0; i < frames; i++)
+            {
+                var entry = 6 + i * 16;
+                if (entry + 16 > bytes.Length) break;
+
+                var width = bytes[entry] == 0 ? 256 : bytes[entry];
+                var size = BitConverter.ToInt32(bytes, entry + 8);
+                var offset = BitConverter.ToInt32(bytes, entry + 12);
+
+                if (size <= 0 || offset < 0 || offset + size > bytes.Length) continue;
+
+                // Для трея Windows сама уменьшит кадр, поэтому берём ближайший к 32 px.
+                var score = Math.Abs(width - 32);
+                if (score >= best) continue;
+
+                best = score;
+                start = offset;
+                length = size;
+            }
+
+            if (start < 0) return LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+
+            var data = new byte[length];
+            Array.Copy(bytes, start, data, 0, length);
+
+            var handle = GCHandle.Alloc(data, GCHandleType.Pinned);
+
+            try
+            {
+                var icon = CreateIconFromResourceEx(handle.AddrOfPinnedObject(), (uint)length,
+                    true, 0x00030000, 32, 32, 0);
+
+                if (icon == IntPtr.Zero) return LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+
+                owned = true;
+                return icon;
+            }
+            finally
+            {
+                handle.Free();
+            }
+        }
+        catch
+        {
+            return LoadIcon(IntPtr.Zero, (IntPtr)IdiApplication);
+        }
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
 
         Send(NimDelete, 0, "");
+
+        if (_ownsIcon) DestroyIcon(_icon);
 
         _window.RemoveHook(WndProc);
         _window.Dispose();
@@ -155,4 +237,12 @@ public sealed class TrayIcon : IDisposable
 
     [DllImport("user32.dll")]
     private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CreateIconFromResourceEx(IntPtr bits, uint size,
+        [MarshalAs(UnmanagedType.Bool)] bool icon, uint version, int width, int height, uint flags);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool DestroyIcon(IntPtr icon);
 }
