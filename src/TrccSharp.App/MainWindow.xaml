@@ -7,7 +7,7 @@
         Icon="assets/TrccSharp.ico"
         Height="880" Width="1180" MinHeight="700" MinWidth="1040"
         Background="{DynamicResource Paper}" Foreground="{DynamicResource Ink}"
-        FontFamily="Segoe UI" FontSize="13"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
         WindowStartupLocation="CenterScreen"
         UseLayoutRounding="True"
         AllowDrop="True" Drop="OnDropFile" DragOver="OnDragOver">
@@ -533,7 +533,7 @@
 
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                 <ToggleButton x:Name="CompactToggle" Style="{StaticResource Burger}" Click="OnCompactClick" />
-                <TextBlock Text="TrccSharp" FontFamily="Segoe UI Light" FontSize="30" Margin="14,0,0,0"
+                <TextBlock Text="TrccSharp" FontFamily="Segoe UI Variable Display Light, Segoe UI Light" FontSize="30" Margin="14,0,0,0"
                            Foreground="{DynamicResource Ink}" />
                 <TextBlock Text="画面" FontFamily="Yu Gothic UI" FontSize="15"
                            Foreground="{DynamicResource Rose}" Margin="12,0,0,5" VerticalAlignment="Bottom" />
@@ -803,7 +803,7 @@
             <StackPanel Orientation="Horizontal">
                 <TextBlock Text="+" FontSize="22" Foreground="#2B2733" VerticalAlignment="Center" />
                 <TextBlock Text="{Binding [custom.addObject], Source={x:Static app:Loc.Instance}}"
-                           FontFamily="Segoe UI Light" FontSize="20" Foreground="#2B2733"
+                           FontFamily="Segoe UI Variable Display Light, Segoe UI Light" FontSize="20" Foreground="#2B2733"
                            Margin="10,0,0,0" VerticalAlignment="Center" />
             </StackPanel>
 
@@ -1255,7 +1255,7 @@
                     <StackPanel Grid.Column="1" Margin="18,0,0,0" VerticalAlignment="Center">
                         <TextBlock x:Name="StatusText" Text="Не подключено" FontSize="13"
                                    Foreground="{DynamicResource Ink}" TextWrapping="Wrap" />
-                        <TextBlock x:Name="InfoText" FontFamily="Consolas" FontSize="11"
+                        <TextBlock x:Name="InfoText" FontSize="11"
                                    Foreground="{DynamicResource Grey}" Margin="0,4,0,0" TextWrapping="Wrap" />
                     </StackPanel>
                 </Grid>
