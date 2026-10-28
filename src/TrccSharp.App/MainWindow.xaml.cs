@@ -19,6 +19,9 @@ using TrccSharp.App.Rendering;
 using TrccSharp.App.Sensors;
 using TrccSharp.Core.Imaging;
 using TrccSharp.Core.Protocol;
+using Shape = System.Windows.Shapes.Shape;
+using WpfEllipse = System.Windows.Shapes.Ellipse;
+using WpfPath = System.Windows.Shapes.Path;
 
 namespace TrccSharp.App;
 
@@ -186,6 +189,9 @@ public partial class MainWindow : Window
         UpdateLangButtons();
         Loc.Changed += OnLanguageChanged;
 
+        // Меню оформления собирается после Loc: названия пунктов берутся из словаря.
+        BuildThemeMenu();
+
         _panelDark = _settings.PanelDark;
 
         _compact = _settings.Compact;
@@ -342,12 +348,11 @@ public partial class MainWindow : Window
         _skin = Skins.Normalize(skin);
         Skins.Apply(_skin);
 
-        UpdatePaletteButtons();
+        UpdateThemeSelection();
 
         // Программные подложки LiquidSegments не всегда ловят смену палитры сами.
         // Обновляем их после того, как выставлены IsChecked, иначе стекло
         // встанет на старый вариант.
-        PaletteSegments?.Refresh();
         AutoSegments?.Refresh();
         AutoOutputSegments?.Refresh();
         TabSegments?.Refresh();
@@ -356,24 +361,18 @@ public partial class MainWindow : Window
         UpdateTitleBar();
     }
 
-    private void OnPaletteClick(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleButton option) return;
-
-        var family = option.Tag as string ?? "cream";
-        var variant = Skins.Variant(_skin);
-
-        ApplySkin(Skins.Combine(family, variant));
-        option.IsChecked = true;
-        SaveSettings();
-    }
-
-    /// <summary>Значок палитры в шапке открывает выбор палитры окна.</summary>
+    /// <summary>Значок палитры в шапке открывает меню оформления.</summary>
     private void OnThemePaletteClick(object sender, RoutedEventArgs e)
     {
         if (ThemePalettePopup is null) return;
 
-        UpdatePaletteButtons();
+        if (ThemePalettePopup.IsOpen)
+        {
+            ThemePalettePopup.IsOpen = false;
+            return;
+        }
+
+        UpdateThemeSelection();
         ThemePalettePopup.IsOpen = true;
     }
 
@@ -386,16 +385,168 @@ public partial class MainWindow : Window
         SaveSettings();
     }
 
-    private void UpdatePaletteButtons()
+    // ── Меню оформления ─────────────────────────────────────────────────────
+
+    /// <summary>Строка меню: сама плашка, слои стекла и точка выбора.</summary>
+    private sealed record ThemeRow(
+        Skins.ThemeChoice Choice,
+        Border Selected,
+        Border Hover,
+        WpfEllipse Dot,
+        TextBlock Label);
+
+    private readonly List<ThemeRow> _themeRows = new();
+
+    /// <summary>Собирает строки меню оформления: значок, название, точка выбора.</summary>
+    private void BuildThemeMenu()
     {
-        if (PaletteCream is null || PaletteOcean is null) return;
+        if (ThemeMenuGrid is null) return;
 
-        var family = Skins.Family(_skin);
+        ThemeMenuGrid.Children.Clear();
+        _themeRows.Clear();
 
-        PaletteCream.IsChecked = family == "cream";
-        PaletteOcean.IsChecked = family == "ocean";
-        PaletteSakura.IsChecked = family == "sakura";
-        PaletteForest.IsChecked = family == "forest";
+        foreach (var choice in Skins.Menu)
+        {
+            var (fill, stroke) = ThemeIcons.Create(choice.Icon);
+
+            var icon = new Grid { Width = 16, Height = 16, VerticalAlignment = VerticalAlignment.Center };
+            if (fill is not null)
+            {
+                var path = new WpfPath { Data = fill };
+                path.SetResourceReference(Shape.FillProperty, "Ink");
+                icon.Children.Add(path);
+            }
+
+            if (stroke is not null)
+            {
+                var path = new WpfPath
+                {
+                    Data = stroke,
+                    StrokeThickness = 1.4,
+                    StrokeStartLineCap = PenLineCap.Round,
+                    StrokeEndLineCap = PenLineCap.Round
+                };
+                path.SetResourceReference(Shape.StrokeProperty, "Ink");
+                icon.Children.Add(path);
+            }
+
+            var label = new TextBlock
+            {
+                Text = Loc.Instance[choice.NameKey],
+                FontSize = 12.5,
+                Margin = new Thickness(8, 0, 0, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            label.SetResourceReference(TextBlock.ForegroundProperty, "Ink");
+
+            var dot = new WpfEllipse
+            {
+                Width = 6.5,
+                Height = 6.5,
+                Opacity = 0,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            dot.SetResourceReference(Shape.FillProperty, "Rose");
+
+            // Выбранная строка — мягкая плашка в тон акцента темы.
+            var selected = new Border { CornerRadius = new CornerRadius(8), Opacity = 0 };
+            selected.SetResourceReference(Border.BorderBrushProperty, "Rule");
+
+            // Жидкое стекло: подсветка всплывает и чуть растягивается под курсором.
+            var hover = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Opacity = 0,
+                IsHitTestVisible = false,
+                RenderTransformOrigin = new Point(0.5, 0.5),
+                RenderTransform = new ScaleTransform(0.94, 0.94)
+            };
+
+            var content = new Grid();
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(20) });
+            content.ColumnDefinitions.Add(new ColumnDefinition());
+            content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+            Grid.SetColumn(icon, 0);
+            Grid.SetColumn(label, 1);
+            Grid.SetColumn(dot, 2);
+            content.Children.Add(icon);
+            content.Children.Add(label);
+            content.Children.Add(dot);
+
+            var layers = new Grid();
+            layers.Children.Add(selected);
+            layers.Children.Add(hover);
+            layers.Children.Add(content);
+
+            var row = new Border
+            {
+                CornerRadius = new CornerRadius(8),
+                Padding = new Thickness(8, 7, 8, 7),
+                Margin = new Thickness(2),
+                Background = Brushes.Transparent,
+                Cursor = Cursors.Hand,
+                Child = layers
+            };
+            row.MouseLeftButtonUp += (_, args) =>
+            {
+                args.Handled = true;
+                OnThemeChoice(choice);
+            };
+            row.MouseEnter += (_, _) => FadeLayer(hover, 1, 1);
+            row.MouseLeave += (_, _) => FadeLayer(hover, 0, 0.94);
+
+            ThemeMenuGrid.Children.Add(row);
+            _themeRows.Add(new ThemeRow(choice, selected, hover, dot, label));
+        }
+
+        UpdateThemeSelection();
+    }
+
+    private void OnThemeChoice(Skins.ThemeChoice choice)
+    {
+        ApplySkin(Skins.Resolve(choice, _skin));
+        SaveSettings();
+
+        if (ThemePalettePopup is not null) ThemePalettePopup.IsOpen = false;
+    }
+
+    /// <summary>Подсветка выбранного пункта: плашка в тон акцента, точка, полужирный.</summary>
+    private void UpdateThemeSelection()
+    {
+        var accent = Skins.ColorOf("Rose");
+
+        foreach (var row in _themeRows)
+        {
+            var active = Skins.IsActive(row.Choice, _skin);
+
+            row.Selected.Opacity = active ? 1 : 0;
+            row.Selected.Background = active
+                ? new SolidColorBrush(Color.FromArgb(46, accent.R, accent.G, accent.B))
+                : Brushes.Transparent;
+
+            row.Selected.BorderThickness = active ? new Thickness(1) : new Thickness(0);
+            row.Dot.Opacity = active ? 1 : 0;
+            row.Label.FontWeight = active ? FontWeights.SemiBold : FontWeights.Normal;
+
+            // Подсветка под курсором — тот же акцент, но вдвое бледнее выбранной строки.
+            row.Hover.Background = new SolidColorBrush(Color.FromArgb(26, accent.R, accent.G, accent.B));
+        }
+    }
+
+    /// <summary>Плавно проявляет слой стекла и чуть меняет его масштаб.</summary>
+    private static void FadeLayer(Border layer, double opacity, double scale)
+    {
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var duration = TimeSpan.FromMilliseconds(170);
+
+        layer.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(opacity, duration) { EasingFunction = ease });
+
+        if (layer.RenderTransform is ScaleTransform transform)
+        {
+            transform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(scale, duration) { EasingFunction = ease });
+            transform.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(scale, duration) { EasingFunction = ease });
+        }
     }
 
     private void UpdateTitleBar()
@@ -666,6 +817,7 @@ public partial class MainWindow : Window
         UpdateMediaSection();
         RefreshEffectiveFps();
         PresetList.Items.Refresh();
+        BuildThemeMenu();
 
         _infoText = "";
         UpdateInfoText(CurrentTheme);

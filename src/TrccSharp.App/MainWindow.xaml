@@ -582,7 +582,7 @@
                 </Button>
 
                 <Button x:Name="PaletteButton" Width="28" Height="28" Margin="0,0,10,0" Click="OnThemePaletteClick"
-                        Cursor="Hand" ToolTip="{Binding [theme.palette], Source={x:Static app:Loc.Instance}}">
+                        Cursor="Hand" ToolTip="{Binding [theme.of], Source={x:Static app:Loc.Instance}}">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Grid Background="Transparent">
@@ -620,31 +620,21 @@
             </StackPanel>
         </Grid>
 
+        <!-- Меню оформления: две колонки значков, выбранная строка подсвечена точкой -->
         <Popup x:Name="ThemePalettePopup" PlacementTarget="{Binding ElementName=PaletteButton}"
                Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
             <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Rule}"
-                    BorderThickness="1" CornerRadius="12" Padding="8" Margin="0,8,0,0" Width="180">
+                    BorderThickness="1" CornerRadius="12" Padding="10,8,10,10" Margin="0,8,0,0" Width="352">
                 <Border.Effect>
                     <DropShadowEffect BlurRadius="16" ShadowDepth="2" Direction="270"
                                       Opacity="0.35" Color="#000000" />
                 </Border.Effect>
-                        <controls:LiquidSegments x:Name="PaletteSegments" PillBrush="{DynamicResource Ink}"
-                                                 PillCornerRadius="9" ShowShells="True" ShellCornerRadius="9">
-                            <UniformGrid Columns="1">
-                                <ToggleButton x:Name="PaletteCream" Style="{StaticResource Seg}" Tag="cream"
-                                              Margin="0,0,0,6" Click="OnPaletteClick"
-                                              Content="{Binding [palette.cream], Source={x:Static app:Loc.Instance}}" />
-                                <ToggleButton x:Name="PaletteOcean" Style="{StaticResource Seg}" Tag="ocean"
-                                              Margin="0,0,0,6" Click="OnPaletteClick"
-                                              Content="{Binding [palette.ocean], Source={x:Static app:Loc.Instance}}" />
-                                <ToggleButton x:Name="PaletteSakura" Style="{StaticResource Seg}" Tag="sakura"
-                                              Margin="0,0,0,6" Click="OnPaletteClick"
-                                              Content="{Binding [palette.sakura], Source={x:Static app:Loc.Instance}}" />
-                                <ToggleButton x:Name="PaletteForest" Style="{StaticResource Seg}" Tag="forest"
-                                              Click="OnPaletteClick"
-                                              Content="{Binding [palette.forest], Source={x:Static app:Loc.Instance}}" />
-                            </UniformGrid>
-                        </controls:LiquidSegments>
+                <StackPanel>
+                    <TextBlock Text="{Binding [theme.of], Source={x:Static app:Loc.Instance}}"
+                               FontSize="10" Foreground="{DynamicResource Grey}" Margin="8,4,0,8" />
+                    <!-- Строки собираются в BuildThemeMenu: значок, название, точка выбора -->
+                    <UniformGrid x:Name="ThemeMenuGrid" Columns="2" />
+                </StackPanel>
             </Border>
         </Popup>
         <!-- Меню добавления объектов -->
