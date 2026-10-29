@@ -620,9 +620,10 @@
             </StackPanel>
         </Grid>
 
-        <!-- Меню оформления: две колонки значков, выбранная строка подсвечена точкой -->
+        <!-- Меню оформления: две колонки значков, выбранная строка подсвечена точкой.
+             StaysOpen=True: закрываем сами, чтобы кнопка-палитра работала переключателем -->
         <Popup x:Name="ThemePalettePopup" PlacementTarget="{Binding ElementName=PaletteButton}"
-               Placement="Bottom" StaysOpen="False" AllowsTransparency="True">
+               Placement="Bottom" StaysOpen="True" AllowsTransparency="True">
             <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Rule}"
                     BorderThickness="1" CornerRadius="12" Padding="10,8,10,10" Margin="0,8,0,0" Width="352">
                 <Border.Effect>
@@ -638,7 +639,7 @@
             </Border>
         </Popup>
         <!-- Меню добавления объектов -->
-        <Popup x:Name="AddMenuPopup" Placement="Center" StaysOpen="False" AllowsTransparency="True">
+        <Popup x:Name="AddMenuPopup" Placement="Center" StaysOpen="True" AllowsTransparency="True">
             <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Rule}"
                     BorderThickness="1" CornerRadius="14" Padding="8" Width="320">
                 <Border.Effect>

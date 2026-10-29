@@ -168,6 +168,18 @@ public partial class MainWindow : Window
         // Меню закрылось (щелчок мимо) — стекло не должно остаться висеть.
         AddMenuPopup.Closed += (_, _) => ResetAddMenuGlass();
 
+        // Меню оформления и меню добавления закрываются щелчком по окну,
+        // сворачиванием окна или Esc.
+        PreviewMouseLeftButtonDown += OnWindowPreviewMouseDown;
+        StateChanged += (_, _) => CloseMenusIfMinimized();
+        PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Escape || !AnyMenuOpen()) return;
+            CloseThemeMenu();
+            CloseAddMenu();
+            e.Handled = true;
+        };
+
         _saveDelay.Tick += (_, _) =>
         {
             _saveDelay.Stop();
@@ -361,19 +373,82 @@ public partial class MainWindow : Window
         UpdateTitleBar();
     }
 
-    /// <summary>Значок палитры в шапке открывает меню оформления.</summary>
+    /// <summary>Значок палитры в шапке открывает и закрывает меню оформления.</summary>
     private void OnThemePaletteClick(object sender, RoutedEventArgs e)
     {
         if (ThemePalettePopup is null) return;
 
-        if (ThemePalettePopup.IsOpen)
+        // Меню закрылось на нажатии этой же кнопки — второй щелчок не должен
+        // открывать его снова.
+        if (_paletteClickCloses)
         {
-            ThemePalettePopup.IsOpen = false;
+            _paletteClickCloses = false;
             return;
         }
 
         UpdateThemeSelection();
         ThemePalettePopup.IsOpen = true;
+    }
+
+    /// <summary>
+    /// Меню живут с StaysOpen=True, чтобы кнопки работали переключателями.
+    /// Закрываем сами: любой щелчок по окну мимо меню.
+    /// </summary>
+    private void OnWindowPreviewMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        // Щелчки внутри меню тоже приходят сюда: их не трогаем, иначе пункт
+        // исчезает раньше, чем успевает получить MouseUp.
+        var inTheme = IsWithin(ThemePalettePopup, e.OriginalSource);
+        var inAdd = IsWithin(AddMenuPopup, e.OriginalSource);
+
+        var paletteOpen = !inTheme && ThemePalettePopup is { IsOpen: true };
+        var addOpen = !inAdd && AddMenuPopup is { IsOpen: true };
+
+        _paletteClickCloses = paletteOpen && PaletteButton?.IsMouseOver == true;
+        _addMenuClickCloses = addOpen && AddObjectButton?.IsMouseOver == true;
+
+        if (paletteOpen) CloseThemeMenu();
+        if (addOpen) CloseAddMenu();
+    }
+
+    /// <summary>Элемент лежит внутри открытого меню.</summary>
+    private static bool IsWithin(Popup? popup, object? source)
+    {
+        if (popup is not { IsOpen: true, Child: DependencyObject root } || source is not DependencyObject node)
+            return false;
+
+        for (var current = node; current is not null;)
+        {
+            if (ReferenceEquals(current, root)) return true;
+
+            current = current is Visual || current is System.Windows.Media.Media3D.Visual3D
+                ? VisualTreeHelper.GetParent(current)
+                : LogicalTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private void CloseThemeMenu()
+    {
+        if (ThemePalettePopup is not null) ThemePalettePopup.IsOpen = false;
+    }
+
+    private void CloseAddMenu()
+    {
+        if (AddMenuPopup is not null) AddMenuPopup.IsOpen = false;
+    }
+
+    private bool AnyMenuOpen() =>
+        ThemePalettePopup is { IsOpen: true } || AddMenuPopup is { IsOpen: true };
+
+    /// <summary>Окно свернули — меню не должны висеть поверх чужих окон.</summary>
+    private void CloseMenusIfMinimized()
+    {
+        if (WindowState != WindowState.Minimized) return;
+
+        CloseThemeMenu();
+        CloseAddMenu();
     }
 
     /// <summary>Чёрно-белый кружок рядом: светлый и тёмный вариант одной палитры.</summary>
@@ -396,6 +471,12 @@ public partial class MainWindow : Window
         TextBlock Label);
 
     private readonly List<ThemeRow> _themeRows = new();
+
+    // Меню оформления было открыто в момент нажатия на кнопку-палитру.
+    private bool _paletteClickCloses;
+
+    // Меню добавления объекта было открыто в момент нажатия на кнопку «+».
+    private bool _addMenuClickCloses;
 
     /// <summary>Собирает строки меню оформления: значок, название, точка выбора.</summary>
     private void BuildThemeMenu()
@@ -507,8 +588,7 @@ public partial class MainWindow : Window
     {
         ApplySkin(Skins.Resolve(choice, _skin));
         SaveSettings();
-
-        if (ThemePalettePopup is not null) ThemePalettePopup.IsOpen = false;
+        CloseThemeMenu();
     }
 
     /// <summary>Подсветка выбранного пункта: плашка в тон акцента, точка, полужирный.</summary>
@@ -986,6 +1066,14 @@ public partial class MainWindow : Window
     private void OnAddWidgetClick(object sender, RoutedEventArgs e)
     {
         if (AddMenuPopup is null) return;
+
+        // Меню закрылось на нажатии этой же кнопки — второй щелчок не должен
+        // открывать его снова.
+        if (_addMenuClickCloses)
+        {
+            _addMenuClickCloses = false;
+            return;
+        }
 
         // Меню появляется по центру окна, чуть выше середины.
         ResetAddMenuGlass();
@@ -3272,4 +3360,7 @@ public partial class MainWindow : Window
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
 }
