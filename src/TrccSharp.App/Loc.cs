@@ -157,6 +157,8 @@ public sealed class Loc : INotifyPropertyChanged
         ["status.connecting"] = ("Подключаюсь к панели…", "Connecting to the panel…"),
         ["status.failed"] = ("Не удалось подключиться", "Connection failed"),
         ["status.stopped"] = ("Остановлено", "Stopped"),
+        ["status.reconnect"] = ("Панель пропала — переподключаюсь…", "Panel lost — reconnecting…"),
+        ["status.resetPanel"] = ("Сбрасываю USB-устройство панели…", "Resetting the panel USB device…"),
         ["status.connected"] = ("Подключено: {0}×{1}, PM={2} FBL={3}", "Connected: {0}×{1}, PM={2} FBL={3}"),
 
         ["preview.hint"] = ("ПРЕВЬЮ · КАДР 1:1 С ПАНЕЛЬЮ", "PREVIEW · 1:1 WITH THE PANEL"),
@@ -179,6 +181,8 @@ public sealed class Loc : INotifyPropertyChanged
         ["log.pickTheme"] = ("выбери тему в списке", "pick a theme in the list"),
         ["log.presetMissing"] = ("файл темы не найден: {0}", "theme file not found: {0}"),
         ["log.sendError"] = ("ошибка отправки: {0}", "send error: {0}"),
+        ["log.resetPanel"] = ("СБРОСИТЬ ПАНЕЛЬ (USB)", "RESET PANEL (USB)"),
+        ["log.resetPanelCancel"] = ("сброс панели отменён", "panel reset cancelled"),
         ["log.video"] = ("видео: {0}", "video: {0}"),
         ["log.noFile"] = ("файл не найден: {0}", "file not found: {0}"),
         ["log.format"] = ("формат не поддерживается: {0}", "format not supported: {0}"),

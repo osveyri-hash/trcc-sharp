@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -41,6 +42,11 @@ public partial class MainWindow : Window
     private SensorSnapshot _snapshot = SensorSnapshot.Empty;
     private bool _running;
     private int _sendErrors;
+
+    // Сколько раз подряд не удалось поднять канал: после нескольких попыток
+    // показываем кнопку сброса USB-устройства панели.
+    private int _connectFailures;
+    private bool _resetBusy;
 
     // Тема «Медиа»: гифка, фото или видео на весь экран панели.
     private MediaClip? _clip;
@@ -134,6 +140,14 @@ public partial class MainWindow : Window
     private long _frameVersion;
     private long _sentVersion = -1;
     private DateTime _lastSendAt = DateTime.MinValue;
+
+    // Панель может отвалиться на ходу (USB-сбой, перезагрузка прошивки, сон шины).
+    // Пока вывод включён, пробуем поднять её заново, а не сдаёмся навсегда.
+    private DateTime _nextConnectAt = DateTime.MinValue;
+    private int _reconnecting;
+
+    // Пользователь сам остановил вывод — фоновые переподключения не нужны.
+    private bool _outputStopped;
 
     // Частота: ползунок задаёт её для тем «Монитор», «Часы», «Минимал», «Тест».
     // В теме «Медиа» ритм берётся у самого файла, поэтому рабочая частота — отдельная.
@@ -2491,99 +2505,196 @@ public partial class MainWindow : Window
         {
             cycle.Restart();
 
-            // Остановлено и свёрнуто в трей — не рисуем и не дёргаем UI.
-            if (_device is null && _hiddenToTray)
-            {
-                try
-                {
-                    await Task.Delay(1000, token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-
-                continue;
-            }
-
-            // 1. Отрисовка — только в UI-потоке (WPF RenderTargetBitmap).
             try
             {
+                // Остановлено и свёрнуто в трей — не рисуем и не дёргаем UI.
+                // Но если вывод включён, а панель отвалилась, окно в трее не должно
+                // мешать переподключению: поднимаем канал, не тратя силы на кадры.
+                if (_device is null && _hiddenToTray)
+                {
+                    if (_running) ScheduleReconnect();
+
+                    await Task.Delay(1000, token);
+                    continue;
+                }
+
+                // 1. Отрисовка — только в UI-потоке (WPF RenderTargetBitmap).
                 await Dispatcher.InvokeAsync(RenderFrame, DispatcherPriority.Render, token);
+
+                // 2. Отправка того же кадра на панель.
+                var device = _device;
+
+                // Канал пропал посреди работы — поднимаем его заново.
+                if (device is null && _running)
+                {
+                    ScheduleReconnect();
+                    device = _device;
+                }
+
+                if (device is not null)
+                {
+                    var version = Volatile.Read(ref _frameVersion);
+                    var keepAliveDue = (DateTime.UtcNow - _lastSendAt).TotalMilliseconds >= KeepAliveMs;
+
+                    // Статичный кадр не гоняем повторно: панели достаточно изменений и keep-alive.
+                    if (version != _sentVersion || keepAliveDue)
+                    {
+                        try
+                        {
+                            var frame = Volatile.Read(ref _frame);
+                            if (frame is not null)
+                            {
+                                device.Send(frame);
+                                sent++;
+
+                                _sentVersion = version;
+                                _lastSendAt = DateTime.UtcNow;
+                            }
+
+                            _sendErrors = 0;
+                        }
+                        catch (ObjectDisposedException)
+                        {
+                            // Вывод остановили между кадрами — это не ошибка.
+                        }
+                        catch (Exception ex)
+                        {
+                            _sendErrors++;
+
+                            // Второй сбой подряд — почти наверняка канал мёртв:
+                            // закрываем его, дальше петля переподключится сама.
+                            if (_sendErrors >= 2)
+                                await Dispatcher.InvokeAsync(() => DropDevice(ex.Message));
+                            else
+                                await Dispatcher.InvokeAsync(() => SetLog("log.sendError", ex.Message));
+                        }
+                    }
+                }
+
+                // 3. Реальная частота за последние 2 секунды: по ней видно, если USB просел.
+                if (window.Elapsed.TotalSeconds >= 2)
+                {
+                    Volatile.Write(ref _measuredFps, sent / window.Elapsed.TotalSeconds);
+                    sent = 0;
+                    window.Restart();
+                }
+
+                // 4. Добираем остаток периода, чтобы не превысить выбранную частоту.
+                // Для статичного кадра период задаёт keep-alive: панель не должна
+                // успеть откатиться к своей картинке между отправками.
+                var period = 1000.0 / _effectiveFps;
+                if (_frameStatic) period = Math.Min(period, KeepAliveMs);
+
+                var remaining = period - cycle.Elapsed.TotalMilliseconds;
+                if (remaining > 1)
+                    await Task.Delay(TimeSpan.FromMilliseconds(remaining), token);
             }
             catch (OperationCanceledException)
             {
                 break;
             }
-
-            // 2. Отправка того же кадра на панель.
-            var device = _device;
-            if (device is not null)
+            catch (Exception ex)
             {
-                var version = Volatile.Read(ref _frameVersion);
-                var keepAliveDue = (DateTime.UtcNow - _lastSendAt).TotalMilliseconds >= KeepAliveMs;
-
-                // Статичный кадр не гоняем повторно: панели достаточно изменений и keep-alive.
-                if (version != _sentVersion || keepAliveDue)
-                {
-                    try
-                    {
-                        var frame = Volatile.Read(ref _frame);
-                        if (frame is not null)
-                        {
-                            device.Send(frame);
-                            sent++;
-
-                            _sentVersion = version;
-                            _lastSendAt = DateTime.UtcNow;
-                        }
-
-                        _sendErrors = 0;
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        // Вывод остановили между кадрами — это не ошибка.
-                    }
-                    catch (Exception ex)
-                    {
-                        var message = ex.Message;
-                        _sendErrors++;
-
-                        if (_sendErrors >= 3)
-                            await Dispatcher.InvokeAsync(StopSending);
-                        else
-                            await Dispatcher.InvokeAsync(() => SetLog("log.sendError", message));
-                    }
-                }
-            }
-
-            // 3. Реальная частота за последние 2 секунды: по ней видно, если USB просел.
-            if (window.Elapsed.TotalSeconds >= 2)
-            {
-                Volatile.Write(ref _measuredFps, sent / window.Elapsed.TotalSeconds);
-                sent = 0;
-                window.Restart();
-            }
-
-            // 4. Добираем остаток периода, чтобы не превысить выбранную частоту.
-            // Для статичного кадра период задаёт keep-alive: панель не должна
-            // успеть откатиться к своей картинке между отправками.
-            var period = 1000.0 / _effectiveFps;
-            if (_frameStatic) period = Math.Min(period, KeepAliveMs);
-
-            var remaining = period - cycle.Elapsed.TotalMilliseconds;
-            if (remaining > 1)
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromMilliseconds(remaining), token);
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
+                // Один плохой кадр не должен убить весь вывод: панель иначе
+                // навсегда останется на последней картинке.
+                Debug.WriteLine($"frame loop: {ex}");
+                await Task.Delay(250, token);
             }
         }
+    }
+
+    /// <summary>
+    /// Канал к панели пропал: закрываем его и пробуем открыть заново с паузой.
+    /// Handshake заодно перезапускает прошивку панели, если та зависла.
+    /// </summary>
+    private void ScheduleReconnect()
+    {
+        if (DateTime.UtcNow < _nextConnectAt) return;
+
+        _nextConnectAt = DateTime.UtcNow.AddSeconds(5);
+        if (Interlocked.CompareExchange(ref _reconnecting, 1, 0) != 0) return;
+
+        _ = Task.Run(ReconnectAsync);
+    }
+
+    private async Task ReconnectAsync()
+    {
+        try
+        {
+            await Dispatcher.InvokeAsync(() => SetStatus("status.reconnect"));
+
+            // Подключение идёт в фоне: на зависшей панели каждая попытка
+            // висит на таймаутах записи, и петля отрисовки не должна этого ждать.
+            var device = await Task.Run(() =>
+            {
+                // Панель уже была в работе — ждать её загрузку три секунды не нужно.
+                var d = PanelDevice.ConnectDefault(bootSettleMs: 500);
+                d.Brightness = _brightness;
+                d.Connect();
+                return d;
+            }, _lifetime.Token);
+
+            // Следующий кадр должен уйти целиком, даже если он не менялся.
+            _sentVersion = -1;
+            _lastSendAt = DateTime.MinValue;
+            _device = device;
+            _connectFailures = 0;
+
+            PanelLog.Write($"reconnect OK: {device.Profile.Width}x{device.Profile.Height} PM={device.Info.Pm} FBL={device.Info.Fbl}");
+
+            await Dispatcher.InvokeAsync(() =>
+            {
+                ShowResetPanel(false);
+                SetStatus("status.connected", device.Profile.Width,
+                    device.Profile.Height, device.Info.Pm, device.Info.Fbl);
+            });
+        }
+        catch (Exception ex)
+        {
+            // Тишина в интерфейсе: панель может быть просто выключена, ждём дальше.
+            Debug.WriteLine($"reconnect: {ex.Message}");
+            PanelLog.Write($"reconnect failed: {ex.Message}");
+
+            _connectFailures++;
+
+            // Панель открывается, но не принимает данные — значит зависла
+            // на уровне USB. Предлагаем сбросить устройство, не трогая питание.
+            if (_connectFailures >= 3)
+                await Dispatcher.InvokeAsync(() => ShowResetPanel(true));
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _reconnecting, 0);
+        }
+    }
+
+    /// <summary>
+    /// Кнопка сброса панели нужна только тогда, когда обычные переподключения
+    /// не помогают: иначе она просто висит в интерфейсе и пугает.
+    /// </summary>
+    private void ShowResetPanel(bool show) =>
+        ResetPanelButton.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>Канал сломался: закрываем его, петля переподключится сама.</summary>
+    private void DropDevice(string reason)
+    {
+        var device = _device;
+        _device = null;
+
+        try
+        {
+            device?.Dispose();
+        }
+        catch
+        {
+            // Мёртвый канал может ругаться при закрытии — это уже неважно.
+        }
+
+        _sendErrors = 0;
+        _nextConnectAt = DateTime.UtcNow.AddSeconds(2);
+        SetStatus("status.reconnect");
+        SetLog("log.sendError", reason);
+        PanelLog.Write($"device dropped: {reason}");
     }
 
     /// <summary>
@@ -3164,21 +3275,24 @@ public partial class MainWindow : Window
     private void UpdateToggleLabel() =>
         ToggleButton.Content = Loc.T(_running ? "run.stop" : "run.start");
 
-    private async void OnToggleClick(object sender, RoutedEventArgs e)
+    private void OnToggleClick(object sender, RoutedEventArgs e)
     {
         if (_running)
         {
+            // Остановили руками — фоновые попытки подключиться больше не нужны.
+            _outputStopped = true;
             StopSending();
             return;
         }
 
-        await StartSendingAsync();
+        _ = StartSendingAsync();
     }
 
     private async Task StartSendingAsync()
     {
         if (_running) return;
 
+        _outputStopped = false;
         _running = true;
         UpdateToggleLabel();
         ToggleButton.IsEnabled = false;
@@ -3199,12 +3313,21 @@ public partial class MainWindow : Window
             }, _lifetime.Token);
 
             _device = device;
+            _connectFailures = 0;
+            ShowResetPanel(false);
+
+            PanelLog.Write($"connected: {device.Profile.Width}x{device.Profile.Height} PM={device.Info.Pm} FBL={device.Info.Fbl}");
+
             SetStatus("status.connected", device.Profile.Width, device.Profile.Height,
                 device.Info.Pm, device.Info.Fbl);
         }
         catch (Exception ex)
         {
             _running = false;
+            _connectFailures++;
+            PanelLog.Write($"connect failed: {ex.Message}");
+
+            if (_connectFailures >= 3) ShowResetPanel(true);
             UpdateToggleLabel();
             SetStatus("status.failed");
             SetLogRaw(ex.Message);
@@ -3220,21 +3343,25 @@ public partial class MainWindow : Window
     /// </summary>
     private async Task StartSendingWithRetryAsync()
     {
-        for (var attempt = 0; attempt < 20; attempt++)
-        {
-            if (_lifetime.IsCancellationRequested) return;
+        // Панель может появиться позже: USB поднимается после сна, помпу включили
+        // не сразу. Ждём сколько нужно, но с растущей паузой, чтобы не частить.
+        var delay = TimeSpan.FromSeconds(2);
 
+        while (!_lifetime.IsCancellationRequested && !_outputStopped)
+        {
             await StartSendingAsync();
             if (_running) return;
 
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(2), _lifetime.Token);
+                await Task.Delay(delay, _lifetime.Token);
             }
             catch (OperationCanceledException)
             {
                 return;
             }
+
+            delay = TimeSpan.FromSeconds(Math.Min(delay.TotalSeconds + 2, 15));
         }
     }
 
@@ -3248,8 +3375,119 @@ public partial class MainWindow : Window
         _sendErrors = 0;
         Volatile.Write(ref _measuredFps, 0);
 
+        PanelLog.Write("output stopped by user");
+
         UpdateToggleLabel();
         SetStatus("status.stopped");
+    }
+
+    // ── Сброс панели по USB ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Бывает, что панель «зависает» на уровне USB: устройство в системе есть,
+    /// но ни один отчёт не принимается. Обычный restart-device это не лечит,
+    /// а снятие устройства и повторное перечисление — лечит (проверено).
+    ///
+    /// Приложение работает без прав администратора, поэтому сброс идёт
+    /// отдельным процессом: появится запрос UAC.
+    /// </summary>
+    private async void OnResetPanelClick(object sender, RoutedEventArgs e)
+    {
+        if (_resetBusy) return;
+
+        _resetBusy = true;
+        ResetPanelButton.IsEnabled = false;
+        SetStatus("status.resetPanel");
+        PanelLog.Write("reset: requested by user");
+
+        try
+        {
+            var result = await Task.Run(ResetPanelDevice);
+
+            if (!result)
+            {
+                SetLog("log.resetPanelCancel");
+                PanelLog.Write("reset: cancelled or failed");
+                SetStatus(_running ? "status.reconnect" : "status.failed");
+                return;
+            }
+
+            // Windows перечисляет устройство не мгновенно: даём ему пару секунд,
+            // чтобы HID-интерфейс успел появиться снова.
+            await Task.Delay(TimeSpan.FromSeconds(4));
+
+            _connectFailures = 0;
+            _nextConnectAt = DateTime.MinValue;
+            _sendErrors = 0;
+
+            if (_running)
+            {
+                ScheduleReconnect();
+            }
+            else
+            {
+                _outputStopped = false;
+                _ = StartSendingAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            SetLogRaw(ex.Message);
+            PanelLog.Write($"reset failed: {ex.Message}");
+        }
+        finally
+        {
+            _resetBusy = false;
+            ResetPanelButton.IsEnabled = true;
+        }
+    }
+
+    /// <summary>
+    /// Снять USB-устройство панели и заставить Windows перечислить его заново.
+    /// Возвращает false, если пользователь отменил запрос прав.
+    /// </summary>
+    private static bool ResetPanelDevice()
+    {
+        var folder = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TrccSharp");
+        Directory.CreateDirectory(folder);
+
+        var script = Path.Combine(folder, "reset-panel.ps1");
+
+        // Перечисление берём по родительскому устройству: у HID-интерфейса
+        // другой instance id, и снимать его отдельно не нужно.
+        File.WriteAllText(script, """
+            $ErrorActionPreference = 'Stop'
+            $devices = Get-PnpDevice -PresentOnly -ErrorAction SilentlyContinue |
+                Where-Object { $_.InstanceId -like 'USB\VID_0416&PID_5302\*' }
+            foreach ($d in $devices) {
+                pnputil /remove-device "$($d.InstanceId)" | Out-Null
+            }
+            Start-Sleep -Seconds 2
+            pnputil /scan-devices | Out-Null
+            Start-Sleep -Seconds 3
+            """, new UTF8Encoding(false));
+
+        var start = new ProcessStartInfo("powershell.exe")
+        {
+            UseShellExecute = true,
+            Verb = "runas",
+            WindowStyle = ProcessWindowStyle.Hidden,
+            Arguments = $"-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File \"{script}\""
+        };
+
+        try
+        {
+            using var process = Process.Start(start);
+            if (process is null) return false;
+
+            return process.WaitForExit(60000);
+        }
+        catch (Win32Exception)
+        {
+            // 1223: пользователь отказался от запроса UAC.
+            return false;
+        }
     }
 
     // ── Трей: закрытие окна не гасит экран СЖО ──────────────────────────────

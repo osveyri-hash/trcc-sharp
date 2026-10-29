@@ -42,6 +42,7 @@ internal static class Program
                 "pattern" => PatternCommand(options),
                 "sweep" => SweepCommand(options),
                 "bench" => BenchCommand(options),
+                "raw" => RawCommand(options),
                 "gpu" => GpuCommand(),
                 "help" or "-h" or "--help" => Help(),
                 _ => Unknown(command),
@@ -321,6 +322,42 @@ internal static class Program
         return 0;
     }
 
+    /// <summary>
+    /// Проверка транспорта без handshake: пробуем записи разной длины и чтение,
+    /// чтобы понять, принимает ли панель отчёты вообще.
+    /// </summary>
+    private static int RawCommand(Dictionary<string, string?> options)
+    {
+        var timeout = options.TryGetValue("timeout", out var t) && int.TryParse(t, out var ms) ? ms : 2000;
+
+        using var link = OpenTarget(options);
+        PrintDeviceInfo(link);
+
+        foreach (var size in new[] { 1, 8, 64, 512, 513 })
+        {
+            var payload = new byte[Math.Min(size, 512)];
+            var stopwatch = Stopwatch.StartNew();
+            try
+            {
+                link.WriteChunk(payload);
+                Console.WriteLine($"  запись {size,4} байт: ок за {stopwatch.ElapsedMilliseconds} мс");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  запись {size,4} байт: {ex.GetType().Name} за {stopwatch.ElapsedMilliseconds} мс — {ex.Message}");
+            }
+
+            Thread.Sleep(200);
+        }
+
+        var reply = link.TryRead(timeout);
+        Console.WriteLine(reply is { Length: > 0 }
+            ? $"  чтение: {Hex(reply)}"
+            : $"  чтение: тишина за {timeout} мс");
+
+        return 0;
+    }
+
     private static ILcdLink OpenTarget(Dictionary<string, string?> options)
     {
         var transport = options.TryGetValue("transport", out var t) && t is not null
@@ -414,6 +451,7 @@ internal static class Program
 
               list                     перечислить найденные USB/HID-интерфейсы
               probe                    открыть панель и выполнить handshake
+              raw                      проверить, принимает ли панель отчёты вообще
               pattern                  handshake + отправить тестовую картинку
               bench                    замер реальной скорости отправки кадров
 

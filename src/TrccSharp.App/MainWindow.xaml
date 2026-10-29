@@ -1248,6 +1248,12 @@
                                    Foreground="{DynamicResource Ink}" TextWrapping="Wrap" />
                         <TextBlock x:Name="InfoText" FontSize="11"
                                    Foreground="{DynamicResource Grey}" Margin="0,4,0,0" TextWrapping="Wrap" />
+
+                        <!-- Панель зависла на уровне USB: снять устройство и перечислить заново. -->
+                        <Button x:Name="ResetPanelButton" Style="{StaticResource Ghost}" Margin="0,8,0,0"
+                                HorizontalAlignment="Left" Visibility="Collapsed"
+                                Content="{Binding [log.resetPanel], Source={x:Static app:Loc.Instance}}"
+                                Click="OnResetPanelClick" />
                     </StackPanel>
                 </Grid>
 
